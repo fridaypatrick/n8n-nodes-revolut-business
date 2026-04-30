@@ -1,0 +1,22 @@
+services:
+  n8n:
+    image: n8nio/n8n:1.89.2
+    ports:
+      - '5678:5678'
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      N8N_EDITOR_BASE_URL: http://localhost:5678/
+      N8N_ENCRYPTION_KEY: revolut-business-local-dev-key
+      N8N_CUSTOM_EXTENSIONS: /home/node/custom
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+      - ./:/home/node/custom/n8n-nodes-revolut-business
+    working_dir: /home/node/custom/n8n-nodes-revolut-business
+    entrypoint:
+      - sh
+      - -c
+    command:
+      - npm install --include=dev && npm run build && n8n start

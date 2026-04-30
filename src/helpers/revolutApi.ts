@@ -1,0 +1,77 @@
+import type {
+	IDataObject,
+	IExecuteFunctions,
+	IHookFunctions,
+	ILoadOptionsFunctions,
+	IN8nHttpFullResponse,
+	IWebhookFunctions,
+	JsonObject,
+} from 'n8n-workflow';
+import { ApplicationError } from 'n8n-workflow';
+
+import type { RevolutEnvironment } from '../types/revolut';
+import { REVOLUT_ENVIRONMENTS } from '../types/revolut';
+
+type RequestContext = IExecuteFunctions | ILoadOptionsFunctions | IHookFunctions | IWebhookFunctions;
+
+export function getBaseUrl(environment: RevolutEnvironment): string {
+	return REVOLUT_ENVIRONMENTS[environment];
+}
+
+export function getCredentialEnvironment(ctx: RequestContext, credentialType = 'revolutBusinessOAuth2Api'): RevolutEnvironment {
+	const data = ctx.getCredentials(credentialType) as { environment?: RevolutEnvironment };
+	return data.environment === 'production' ? 'production' : 'sandbox';
+}
+
+export async function revolutApiRequest<T = IDataObject | IDataObject[]>(
+	ctx: RequestContext,
+	method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+	endpoint: string,
+	body?: IDataObject,
+	qs?: IDataObject,
+	ignoreHttpStatusErrors = false,
+): Promise<T> {
+	const environment = getCredentialEnvironment(ctx);
+	const baseURL = getBaseUrl(environment);
+
+	try {
+		return await ctx.helpers.requestOAuth2.call(ctx, 'revolutBusinessOAuth2Api', {
+			method,
+			baseURL,
+			url: endpoint,
+			qs,
+			body,
+			json: true,
+			simple: !ignoreHttpStatusErrors,
+			resolveWithFullResponse: ignoreHttpStatusErrors,
+		});
+	} catch (error) {
+		throw new ApplicationError(`Revolut Business API request failed: ${(error as Error).message}`, {
+			extra: { endpoint, method, baseURL },
+		});
+	}
+}
+
+export async function revolutApiRequestWithFullResponse(
+	ctx: RequestContext,
+	method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+	endpoint: string,
+	body?: IDataObject,
+	qs?: IDataObject,
+): Promise<IN8nHttpFullResponse> {
+	return (await revolutApiRequest(ctx, method, endpoint, body, qs, true)) as unknown as IN8nHttpFullResponse;
+}
+
+export function isNotFoundResponse(response: IN8nHttpFullResponse | undefined): boolean {
+	return response?.statusCode === 404;
+}
+
+export function normaliseWebhookHeaders(headers: JsonObject | undefined): Record<string, string> {
+	const normalised: Record<string, string> = {};
+	for (const [key, value] of Object.entries(headers ?? {})) {
+		if (typeof value === 'string') {
+			normalised[key.toLowerCase()] = value;
+		}
+	}
+	return normalised;
+}

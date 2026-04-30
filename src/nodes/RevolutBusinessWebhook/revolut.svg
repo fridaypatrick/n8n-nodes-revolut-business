@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Revolut">
+  <rect width="256" height="256" rx="48" fill="#191c1f"/>
+  <path fill="#fff" d="M70 72h67.4c29.3 0 48.6 16.7 48.6 42.4 0 18.7-9.7 31.6-26.6 37.9L186 184h-32.9l-22.3-27.1H102V184H70V72Zm32 57.8h31.1c13.4 0 21.1-5.5 21.1-15.4 0-9.7-7.6-15.1-21.1-15.1H102v30.5Z"/>
+</svg>

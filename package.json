@@ -1,0 +1,56 @@
+{
+  "name": "n8n-nodes-revolut-business",
+  "version": "0.1.0",
+  "description": "n8n community node for Revolut Business webhooks",
+  "license": "MIT",
+  "homepage": "https://github.com/ppiatkowski/n8n-nodes-revolut-business",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "revolut",
+    "revolut-business",
+    "webhooks"
+  ],
+  "author": "Patrick Piatkowski",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "clean": "rm -rf dist",
+    "dev": "tsc -w -p tsconfig.json",
+    "prepack": "npm run clean && npm run build",
+    "simulate:webhook": "node scripts/simulate-webhook.mjs",
+    "test": "tsx --test test/**/*.test.ts",
+    "test:src": "tsx --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "n8n-workflow": "^2.16.0"
+  },
+  "peerDependencies": {
+    "n8n-core": "^2.16.1"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.15.18",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20.15"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/src/credentials/RevolutBusinessOAuth2Api.credentials.js"
+    ],
+    "nodes": [
+      "dist/src/nodes/RevolutBusinessWebhook/RevolutBusinessWebhook.node.js",
+      "dist/src/nodes/RevolutBusinessWebhookTrigger/RevolutBusinessWebhookTrigger.node.js"
+    ]
+  }
+}
