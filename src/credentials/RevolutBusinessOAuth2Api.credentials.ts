@@ -12,7 +12,7 @@ import { createClientAssertionJwt } from '../helpers/revolutAuth';
 export class RevolutBusinessOAuth2Api implements ICredentialType {
 	name = 'revolutBusinessOAuth2Api';
 	displayName = 'Revolut Business OAuth2 API';
-	icon = 'file:revolut.svg' as const;
+	icon = 'file:bank-icon.svg' as const;
 	documentationUrl = 'https://developer.revolut.com/docs/business/business-api';
 	extends = ['oAuth2Api'];
 	properties: INodeProperties[] = [

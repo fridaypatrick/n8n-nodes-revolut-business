@@ -14,7 +14,7 @@ export class RevolutBusinessWebhook implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Revolut Business Webhook',
 		name: 'revolutBusinessWebhook',
-		icon: 'file:revolut.svg',
+		icon: 'file:bank-icon.svg',
 		group: ['input'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',

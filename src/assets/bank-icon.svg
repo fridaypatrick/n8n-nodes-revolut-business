@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Bank integration icon">
+  <rect width="256" height="256" rx="48" fill="#20242a"/>
+  <path fill="#f4f6f8" d="M128 48 L52 88 v18 h152 v-18 L128 48 Z M128 68 l40 20 H88 l40-20 Z M62 124 h24 v52 H62 v-52 Z M98 124 h24 v52 H98 v-52 Z M134 124 h24 v52 h-24 v-52 Z M170 124 h24 v52 h-24 v-52 Z M52 192 h152 v18 H52 v-18 Z"/>
+</svg>

@@ -2,19 +2,19 @@ import { cpSync, existsSync, mkdirSync } from 'node:fs';
 
 const assetCopies = [
 	{
-		sourceFile: 'src/assets/revolut.svg',
+		sourceFile: 'src/assets/bank-icon.svg',
 		targetDir: 'dist/src/nodes/RevolutBusinessWebhook',
-		fileName: 'revolut.svg',
+		fileName: 'bank-icon.svg',
 	},
 	{
-		sourceFile: 'src/assets/revolut.svg',
+		sourceFile: 'src/assets/bank-icon.svg',
 		targetDir: 'dist/src/credentials',
-		fileName: 'revolut.svg',
+		fileName: 'bank-icon.svg',
 	},
 	{
-		sourceFile: 'src/assets/revolut.svg',
+		sourceFile: 'src/assets/bank-icon.svg',
 		targetDir: 'dist/src/nodes/RevolutBusinessWebhookTrigger',
-		fileName: 'revolut.svg',
+		fileName: 'bank-icon.svg',
 	},
 ];
 

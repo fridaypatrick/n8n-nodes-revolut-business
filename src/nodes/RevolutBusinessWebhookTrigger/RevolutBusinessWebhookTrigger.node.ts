@@ -49,7 +49,7 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Revolut Business Trigger',
 		name: 'revolutBusinessWebhookTrigger',
-		icon: 'file:revolut.svg',
+		icon: 'file:bank-icon.svg',
 		group: ['trigger'],
 		version: 1,
 		description: 'Handle incoming Revolut Business webhook events',
