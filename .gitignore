@@ -4,3 +4,8 @@ dist/
 .DS_Store
 n8n_data/
 *.log
+.revolut/
+*.key
+*.pem
+*.crt
+*.csr

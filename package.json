@@ -20,8 +20,11 @@
   "types": "dist/src/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "cloudflare:tunnel": "cloudflared tunnel --url http://localhost:5678",
     "clean": "rm -rf dist",
     "dev": "tsc -w -p tsconfig.json",
+    "dev:tunnel": "node scripts/start-tunnel-compose.mjs",
+    "generate:certificate": "node scripts/generate-certificate.mjs",
     "prepack": "npm run clean && npm run build",
     "release": "semantic-release",
     "simulate:webhook": "node scripts/simulate-webhook.mjs",

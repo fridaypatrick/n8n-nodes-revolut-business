@@ -21,6 +21,21 @@ Sandbox-first n8n community node scaffold for Revolut Business webhooks.
 
 ### 2. Generate an RSA key pair locally
 
+**Preferred — use the built-in script:**
+
+```bash
+npm run generate:certificate
+```
+
+This writes two files under `.revolut/` (already git-ignored):
+
+| File | Purpose |
+|------|---------|
+| `.revolut/revolut-business-certificate.pem` | Upload to Revolut (public certificate) |
+| `.revolut/revolut-business-private-key.pem` | Paste into the n8n credential (private key) |
+
+**Manual alternative — plain OpenSSL:**
+
 ```bash
 # Generate 2048-bit private key
 openssl genrsa -out revolut_private.pem 2048
@@ -31,12 +46,12 @@ openssl req -new -x509 -key revolut_private.pem \
   -subj "/CN=n8n-revolut-business"
 ```
 
-Keep `revolut_private.pem` secret. You will paste it into n8n; never commit it to source control.
+Keep the private key secret. Never commit it to source control.
 
 ### 3. Upload the public certificate to Revolut
 
 1. In the Revolut Business API settings for your app, find **Upload certificate** or **API certificate**.
-2. Upload `revolut_public.cer`.
+2. Upload `.revolut/revolut-business-certificate.pem` (or `revolut_public.cer` if you used OpenSSL manually).
 3. After upload, Revolut shows an **API Certificate ID** (sometimes called `kid`). Copy it.
 
 ### 4. Configure the n8n credential
@@ -45,7 +60,7 @@ Keep `revolut_private.pem` secret. You will paste it into n8n; never commit it t
 2. Set **Environment** to **Production**.
 3. Paste the **Client ID** from step 1.
 4. Paste the **API Certificate ID** (kid) from step 3.
-5. Paste the full contents of `revolut_private.pem` into the **Private Key** field.
+5. Paste the full contents of `.revolut/revolut-business-private-key.pem` (or `revolut_private.pem` if you used OpenSSL manually) into the **Private Key** field.
 6. Set **Scopes** to the permissions your workflows need. For webhook management use at minimum:
    - `READ` — list/get webhooks and failed events
    - `WRITE` — create/update/delete webhooks and rotate signing secret
