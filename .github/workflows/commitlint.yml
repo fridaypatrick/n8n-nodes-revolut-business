@@ -1,0 +1,54 @@
+name: Commitlint
+
+on:
+  pull_request:
+  push:
+    branches:
+      - '**'
+
+permissions:
+  contents: read
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            FROM="$PR_BASE_SHA"
+            TO="$PR_HEAD_SHA"
+          else
+            FROM="$PUSH_BEFORE_SHA"
+            TO="$PUSH_SHA"
+          fi
+
+          if [ -z "$FROM" ] || [ "$FROM" = "0000000000000000000000000000000000000000" ]; then
+            FROM="$(git rev-list --max-parents=0 "$TO")"
+          fi
+
+          npx --yes \
+            --package @commitlint/cli \
+            --package @commitlint/config-conventional \
+            commitlint --extends @commitlint/config-conventional --from "$FROM" --to "$TO" --verbose
