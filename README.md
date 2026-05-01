@@ -58,6 +58,18 @@ docker compose up
 
 This mounts the current package into n8n as a custom extension, installs dependencies in the container, builds the package, and starts n8n on `http://localhost:5678`.
 
+#### Local test account
+
+The development image auto-provisions a local owner account on first start via the `N8N_INSTANCE_OWNER_*` environment variables set in `docker-compose.yml`. This account is **local-development only**.
+
+| Field    | Value                   |
+|----------|-------------------------|
+| URL      | `http://localhost:5678` |
+| Email    | `admin@example.com`     |
+| Password | `N8n-dev-password`      |
+
+> **Warning:** These credentials are provisioned by the docker-compose instance-owner env vars for local development only. Do not reuse them in any staging or production environment.
+
 ## Local OAuth callback expectation
 
 For the Docker setup here, n8n is configured around `http://localhost:5678/`, so the callback URL will be derived from that host context. In practice, confirm the exact callback shown by n8n and register that exact value in Revolut.
