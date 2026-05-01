@@ -36,12 +36,12 @@
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^22.15.18",
+    "@types/node": "^24.12.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3"
   },
   "engines": {
-    "node": ">=20.15"
+    "node": ">=22.22.0 <25"
   },
   "n8n": {
     "n8nNodesApiVersion": 1,
@@ -52,5 +52,8 @@
       "dist/src/nodes/RevolutBusinessWebhook/RevolutBusinessWebhook.node.js",
       "dist/src/nodes/RevolutBusinessWebhookTrigger/RevolutBusinessWebhookTrigger.node.js"
     ]
+  },
+  "volta": {
+    "node": "24.15.0"
   }
 }
