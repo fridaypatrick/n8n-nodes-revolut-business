@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import jwt from 'jsonwebtoken';
 
+import { RevolutBusinessOAuth2Api } from '../src/credentials/RevolutBusinessOAuth2Api.credentials';
 import { createClientAssertionJwt, getRevolutAuthorizeUrl, getRevolutTokenUrl } from '../src/helpers/revolutAuth';
 
 const privateKey = `-----BEGIN PRIVATE KEY-----
@@ -47,6 +48,7 @@ test('builds production token and authorize URLs', () => {
 test('creates a signed client assertion JWT', () => {
 	const token = createClientAssertionJwt({
 		clientId: 'test-client-id',
+		issuer: 'configured-issuer.example.com',
 		privateKey,
 		environment: 'sandbox',
 		kid: 'kid-123',
@@ -56,7 +58,64 @@ test('creates a signed client assertion JWT', () => {
 
 	assert.equal(decoded.header.alg, 'RS256');
 	assert.equal(decoded.header.kid, 'kid-123');
-	assert.equal(decoded.payload.iss, 'test-client-id');
+	assert.equal(decoded.payload.iss, 'configured-issuer.example.com');
 	assert.equal(decoded.payload.sub, 'test-client-id');
-	assert.equal(decoded.payload.aud, 'https://sandbox-business.revolut.com/api/1.0/auth/token');
+	assert.equal(decoded.payload.aud, 'https://revolut.com');
+});
+
+test('falls back JWT issuer to client ID when no issuer is provided', () => {
+	const token = createClientAssertionJwt({
+		clientId: 'test-client-id',
+		privateKey,
+		environment: 'sandbox',
+		kid: 'kid-123',
+	});
+
+	const decoded = jwt.decode(token) as { iss: string; sub: string };
+
+	assert.equal(decoded.iss, 'test-client-id');
+	assert.equal(decoded.sub, 'test-client-id');
+});
+
+test('preAuthentication returns Revolut private_key_jwt token body parameters', async () => {
+	const credential = new RevolutBusinessOAuth2Api();
+	const payload = await credential.preAuthentication.call({} as never, {
+		clientId: 'test-client-id',
+		privateKey,
+		environment: 'sandbox',
+		kid: 'kid-123',
+		jwtIssuer: 'configured-issuer.example.com',
+	});
+
+	assert.equal(payload.client_id, 'test-client-id');
+	assert.equal(payload.client_assertion_type, 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+	assert.equal(typeof payload.client_assertion, 'string');
+
+	const decoded = jwt.decode(payload.client_assertion as string, { complete: true }) as { header: { kid: string }; payload: { iss: string; sub: string; aud: string } };
+
+	assert.equal(decoded.header.kid, 'kid-123');
+	assert.equal(decoded.payload.iss, 'configured-issuer.example.com');
+	assert.equal(decoded.payload.sub, 'test-client-id');
+	assert.equal(decoded.payload.aud, 'https://revolut.com');
+});
+
+test('credential maps visible Revolut scope into n8n OAuth2 scope field', () => {
+	const credential = new RevolutBusinessOAuth2Api();
+	const revolutScope = credential.properties.find((property) => property.name === 'revolutScope');
+	const oauthScope = credential.properties.find((property) => property.name === 'scope');
+
+	assert.equal(revolutScope?.type, 'string');
+	assert.equal(revolutScope?.default, 'READ,EDIT');
+	assert.equal(oauthScope?.type, 'hidden');
+	assert.equal(oauthScope?.default, '={{$self["revolutScope"]}}');
+});
+
+test('credential exposes configured JWT issuer field', () => {
+	const credential = new RevolutBusinessOAuth2Api();
+	const jwtIssuer = credential.properties.find((property) => property.name === 'jwtIssuer');
+
+	assert.equal(jwtIssuer?.displayName, 'JWT Issuer (iss)');
+	assert.equal(jwtIssuer?.type, 'string');
+	assert.equal(jwtIssuer?.required, true);
+	assert.match(jwtIssuer?.description ?? '', /Revolut Business API configuration/);
 });

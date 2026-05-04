@@ -56,14 +56,28 @@ export class RevolutBusinessOAuth2Api implements ICredentialType {
 			name: 'kid',
 			type: 'string',
 			default: '',
-			description: 'Optional certificate key identifier if required by your Revolut app setup.',
+			description: 'Optional API Certificate ID to send as the JWT header kid. Revolut may require this to match the certificate ID shown for your Business API app.',
+		},
+		{
+			displayName: 'JWT Issuer (iss)',
+			name: 'jwtIssuer',
+			type: 'string',
+			default: '',
+			required: true,
+			description: 'Issuer to send in the client assertion JWT iss claim. This must exactly match the issuer shown in your Revolut Business API configuration.',
 		},
 		{
 			displayName: 'Scopes',
-			name: 'scope',
+			name: 'revolutScope',
 			type: 'string',
-			default: 'READ WRITE',
-			description: 'Space-separated scopes. For this first increment, READ WRITE is usually enough.',
+			default: 'READ,EDIT',
+			description: 'Valid Revolut scopes are case-sensitive and comma-separated. READ,EDIT is required for webhook management.',
+		},
+		{
+			displayName: 'Scope',
+			name: 'scope',
+			type: 'hidden',
+			default: '={{$self["revolutScope"]}}',
 		},
 		{
 			displayName: 'Auth URI',
@@ -118,12 +132,14 @@ export class RevolutBusinessOAuth2Api implements ICredentialType {
 		const environment = (credentials.environment as 'sandbox' | 'production' | undefined) ?? 'sandbox';
 		const clientAssertion = createClientAssertionJwt({
 			clientId: credentials.clientId as string,
+			issuer: (credentials.jwtIssuer as string) || undefined,
 			privateKey: credentials.privateKey as string,
 			kid: (credentials.kid as string) || undefined,
 			environment,
 		});
 
 		return {
+			client_id: credentials.clientId as string,
 			client_assertion: clientAssertion,
 			client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
 		};

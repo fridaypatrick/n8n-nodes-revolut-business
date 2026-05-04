@@ -2,8 +2,11 @@ import jwt from 'jsonwebtoken';
 
 import type { RevolutEnvironment } from '../types/revolut';
 
+const REVOLUT_CLIENT_ASSERTION_AUDIENCE = 'https://revolut.com';
+
 export interface JwtAssertionOptions {
 	clientId: string;
+	issuer?: string;
 	privateKey: string;
 	kid?: string;
 	environment: RevolutEnvironment;
@@ -23,12 +26,13 @@ export function getRevolutAuthorizeUrl(environment: RevolutEnvironment): string 
 
 export function createClientAssertionJwt(options: JwtAssertionOptions): string {
 	const now = Math.floor(Date.now() / 1000);
+	const issuer = options.issuer || options.clientId;
 
 	return jwt.sign(
 		{
-			iss: options.clientId,
+			iss: issuer,
 			sub: options.clientId,
-			aud: getRevolutTokenUrl(options.environment),
+			aud: REVOLUT_CLIENT_ASSERTION_AUDIENCE,
 			iat: now,
 			exp: now + 300,
 		},

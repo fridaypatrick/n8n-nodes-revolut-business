@@ -59,11 +59,12 @@ Keep the private key secret. Never commit it to source control.
 1. In n8n, go to **Credentials → New → Revolut Business OAuth2 API**.
 2. Set **Environment** to **Production**.
 3. Paste the **Client ID** from step 1.
-4. Paste the **API Certificate ID** (kid) from step 3.
+4. Paste the **API Certificate ID** (kid) from step 3 into the **Key ID** field. This value is sent as the `kid` header in every `private_key_jwt` assertion and must exactly match the certificate registered in Revolut.
 5. Paste the full contents of `.revolut/revolut-business-private-key.pem` (or `revolut_private.pem` if you used OpenSSL manually) into the **Private Key** field.
-6. Set **Scopes** to the permissions your workflows need. For webhook management use at minimum:
+6. Set the **JWT Issuer (iss)** field to the exact issuer value shown in Revolut Business API configuration — typically displayed as *"The issuer ("iss") in your JWT: `<domain>`"*. Copy that value verbatim (no `https://` scheme, no trailing slash) into the field. This value is embedded in every `private_key_jwt` assertion; a mismatch causes `401 Unauthorized` at token exchange.
+7. Set **Scopes** to the permissions your workflows need. Scopes are **case-sensitive** and **comma-separated**; valid values include `READ`, `EDIT`, and `PAY`. For webhook management use at minimum:
    - `READ` — list/get webhooks and failed events
-   - `WRITE` — create/update/delete webhooks and rotate signing secret
+   - `EDIT` — create/update/delete webhooks and rotate signing secret
 
 ### 5. Register the OAuth redirect URI
 
@@ -148,7 +149,125 @@ The development image auto-provisions a local owner account on first start via t
 
 ## Local OAuth callback expectation
 
-For the Docker setup here, n8n is configured around `http://localhost:5678/`, so the callback URL will be derived from that host context. In practice, confirm the exact callback shown by n8n and register that exact value in Revolut.
+For the Docker setup here, n8n derives the OAuth callback URL from `N8N_EDITOR_BASE_URL` or `WEBHOOK_URL`. Without tunnel mode, both default to `http://localhost:5678`, so the callback will be `http://localhost:5678/rest/oauth2-credential/callback`. In tunnel mode the script sets both variables to the public tunnel URL, overriding this default. Confirm the exact callback shown by n8n in the credential form and register that exact value in Revolut.
+
+## Cloudflare Tunnel (local HTTPS for sandbox testing)
+
+Revolut requires an **exact, registered redirect URI** for OAuth and delivers webhooks only to reachable HTTPS endpoints. A Cloudflare Tunnel exposes your local Docker n8n instance over a public HTTPS URL without opening firewall ports.
+
+> **Editor stays local.** The n8n editor UI remains at `http://localhost:5678`. Only the OAuth callback URL and webhook delivery URLs use the public HTTPS URL.
+
+> **How tunnel mode sets the public URL.** The tunnel script passes the public tunnel URL as both `WEBHOOK_URL` and `N8N_EDITOR_BASE_URL` to the n8n container. n8n may use either variable when generating OAuth callback URLs, so both must point to the public URL for Revolut's redirect URI to resolve correctly. This does not affect local editor access — `http://localhost:5678` continues to work as normal.
+
+### Prerequisites
+
+`cloudflared` must be installed and available on your `PATH`. `npm run dev:tunnel` spawns or manages the `cloudflared` process directly — if the binary is missing you will see:
+
+```
+Error: spawn cloudflared ENOENT
+```
+
+Install `cloudflared` from the [Cloudflare official installation instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) before running any tunnel command.
+
+### Quick tunnel (ephemeral URL)
+
+```bash
+npm run dev:tunnel
+```
+
+`cloudflared` starts alongside Docker Compose and prints a random `*.trycloudflare.com` URL. Set that URL as `N8N_WEBHOOK_URL` in Revolut's redirect URI settings.
+
+**Limitation:** the URL changes every run. You must re-register the redirect URI in Revolut each time. Not recommended for repeated sandbox testing.
+
+### Named tunnel (stable URL — recommended)
+
+#### One-time cloudflared setup (required before first use)
+
+Before running `npm run dev:tunnel` with `CLOUDFLARE_TUNNEL_NAME`, you must authenticate `cloudflared` and create the tunnel once:
+
+```bash
+# 1. Authenticate — opens a browser to authorise your Cloudflare account.
+#    Writes the origin certificate (~/.cloudflared/cert.pem) that cloudflared needs.
+cloudflared tunnel login
+
+# 2. Create the named tunnel (only once per tunnel name).
+cloudflared tunnel create my-n8n-tunnel
+
+# 3. Route a DNS hostname to the tunnel (replace with your actual domain).
+cloudflared tunnel route dns my-n8n-tunnel my-n8n-tunnel.example.com
+```
+
+See the [Cloudflare Tunnel setup guide](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/) for full details.
+
+#### Configure `~/.cloudflared/config.yml`
+
+After creating the tunnel, add an ingress rule that maps your custom hostname to the local n8n instance. Without this, `cloudflared` has no route and returns **503** for every request.
+
+```yaml
+tunnel: my-n8n-tunnel
+credentials-file: /Users/<you>/.cloudflared/<tunnel-id>.json
+
+ingress:
+  - hostname: my-n8n-tunnel.example.com
+    service: http://localhost:5678
+  - service: http_status:404
+```
+
+Replace `my-n8n-tunnel.example.com` with the hostname you routed in step 3, and `<tunnel-id>` with the UUID printed by `cloudflared tunnel create`.
+
+> **503 / "No ingress rules were defined"?** If `cloudflared` logs `No ingress rules were defined in the config file` or returns 503 for all requests, the `config.yml` is missing or the `ingress` block is absent/incorrect. Add or fix the ingress rule above and restart the tunnel.
+
+> **Origin cert error?** If you see messages like `Cannot determine default origin certificate path`, `No file cert.pem`, `error parsing tunnel ID`, or `Error locating origin cert`, `cloudflared` cannot find its login certificate or tunnel config — this is a `cloudflared` authentication issue, not an n8n error. Run `cloudflared tunnel login` to generate the certificate, then retry.
+
+#### Running the named tunnel
+
+Set two environment variables before running:
+
+```bash
+export CLOUDFLARE_TUNNEL_NAME=my-n8n-tunnel   # your pre-created tunnel name
+export N8N_WEBHOOK_URL=https://my-n8n-tunnel.example.com  # stable public URL
+npm run dev:tunnel
+```
+
+The tunnel reuses the same hostname on every run. Register `https://my-n8n-tunnel.example.com/rest/oauth2-credential/callback` once in Revolut and it remains valid across restarts.
+
+#### Using a `.env` file instead of exporting variables
+
+`npm run dev:tunnel` reads a `.env` file in the project root as an alternative to exporting shell variables. Create the file once and it is picked up automatically on every run:
+
+```dotenv
+N8N_WEBHOOK_URL=https://my-n8n-tunnel.example.com
+CLOUDFLARE_TUNNEL_NAME=my-n8n-tunnel
+```
+
+- Shell environment variables take precedence over `.env` values when both are set.
+- `.env` is listed in `.gitignore` and must stay local — do not commit it.
+
+### Externally managed tunnel
+
+If `cloudflared` is already running elsewhere (e.g. a persistent service or a separate `docker-compose` profile), set `N8N_WEBHOOK_URL` to your public URL and omit `CLOUDFLARE_TUNNEL_NAME`. The script will not start a new `cloudflared` process.
+
+```bash
+export N8N_WEBHOOK_URL=https://my-n8n-tunnel.example.com
+# CLOUDFLARE_TUNNEL_NAME is not set — cloudflared is managed externally
+docker compose up
+# or equivalently:
+npm run dev:tunnel
+```
+
+n8n uses `N8N_WEBHOOK_URL` to construct its OAuth callback and webhook URLs; the tunnel itself is your responsibility.
+
+> **Redirect URI shows `localhost`?** If the Revolut authorize URL contains `redirect_uri=http://localhost:5678/...`, the tunnel environment variables (`WEBHOOK_URL` / `N8N_EDITOR_BASE_URL`) were not applied to the running container. Stop the container, ensure the tunnel script or `.env` sets both variables to the public URL, and recreate the container (`docker compose down && npm run dev:tunnel`). Do not just restart — environment changes require container recreation.
+
+### Which mode to use
+
+| Scenario | Recommended mode |
+|---|---|
+| First-time setup / quick test | Quick tunnel |
+| Repeated sandbox development | Named tunnel |
+| CI or persistent infra | Externally managed tunnel |
+
+> **Revolut redirect URI reminder:** Revolut enforces exact URI matches. Register the full callback path (`/rest/oauth2-credential/callback`) shown by n8n, not just the base URL. With a named tunnel this only needs to be done once per tunnel hostname.
 
 ## Trigger node usage
 
@@ -198,3 +317,24 @@ If Revolut documents a different header name or encoding for your account/versio
 - Automatic webhook registration assumes the standard n8n trigger lifecycle for activation/deactivation.
 - Signature verification is best-effort until header/encoding details are fully confirmed from live traffic or newer docs.
 - This scaffold does not yet implement additional Business API resources beyond webhooks.
+
+## Troubleshooting
+
+**Token exchange returns `401 Unauthorized`**
+
+This almost always means a mismatch between the credential fields and what Revolut has on record. Check:
+
+- The **Private Key** matches the certificate uploaded to Revolut (they must be a pair).
+- The **Key ID** (kid) exactly matches the **API Certificate ID** shown in Revolut's API settings after upload.
+- The **JWT Issuer (iss)** matches the issuer domain shown in Revolut's API configuration (e.g. `my-n8n-tunnel.example.com`). A wrong, missing, or scheme-prefixed value is a common cause of `401` at token exchange.
+- The **Client ID** is correct for the environment (sandbox vs. production).
+- The OAuth connection is not stale — if you changed any credential field after the initial connect, **reconnect** the credential (disconnect and click Connect again) so n8n fetches a fresh token using the updated values.
+
+**Revolut rejects scopes / `invalid_scope` error**
+
+Scopes are case-sensitive and comma-separated with no spaces. If Revolut returns a scope error:
+
+1. Inspect the authorize URL that n8n opens — look for the `scope` query parameter.
+2. It should read `scope=READ%2CEDIT` (URL-encoded) or `scope=READ,EDIT` (decoded). Any other casing or separator will be rejected.
+3. Correct the **Scopes** field in the credential to exactly `READ,EDIT` (or `READ,EDIT,PAY` if payment access is also needed), then **save and reconnect** the credential (disconnect and click Connect again).
+4. If the authorize URL still shows the old scope value after reconnecting, n8n may be using a cached credential state. **Create a fresh Revolut Business OAuth2 API credential** from scratch and re-enter all fields — this clears any stale saved scope.
