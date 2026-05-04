@@ -14,6 +14,8 @@ import { REVOLUT_ENVIRONMENTS } from '../types/revolut';
 
 type RequestContext = IExecuteFunctions | ILoadOptionsFunctions | IHookFunctions | IWebhookFunctions;
 
+const WEBHOOK_WRITE_SCOPE_HINT = 'Revolut webhook write operations require the WRITE OAuth scope. Re-run `npm run revolut:auth` with READ,WRITE scopes and paste the new refresh token into this credential.';
+
 export function getBaseUrl(environment: RevolutEnvironment): string {
 	return REVOLUT_ENVIRONMENTS[environment];
 }
@@ -45,10 +47,41 @@ export async function revolutApiRequest<T = IDataObject | IDataObject[]>(
 			ignoreHttpStatusErrors,
 		});
 	} catch (error) {
-		throw new ApplicationError(`Revolut Business API request failed: ${(error as Error).message}`, {
+		throw new ApplicationError(buildRevolutApiErrorMessage(error, method, endpoint), {
 			extra: { endpoint, method, baseURL },
 		});
 	}
+}
+
+export function buildRevolutApiErrorMessage(
+	error: unknown,
+	method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+	endpoint: string,
+): string {
+	const message = error instanceof Error ? error.message : String(error);
+	const statusCode = getErrorStatusCode(error);
+	const isWebhookWrite = endpoint.startsWith('/webhooks') && method !== 'GET';
+	const isForbidden = statusCode === 403 || /\bforbidden\b/i.test(message);
+	const scopeHint = isForbidden && isWebhookWrite ? ` ${WEBHOOK_WRITE_SCOPE_HINT}` : '';
+
+	return `Revolut Business API request failed: ${message}.${scopeHint}`;
+}
+
+function getErrorStatusCode(error: unknown): number | undefined {
+	if (!error || typeof error !== 'object') {
+		return undefined;
+	}
+
+	const candidate = error as { statusCode?: unknown; httpCode?: unknown; response?: { statusCode?: unknown; status?: unknown } };
+	const statusCode = candidate.statusCode ?? candidate.httpCode ?? candidate.response?.statusCode ?? candidate.response?.status;
+	if (typeof statusCode === 'number') {
+		return statusCode;
+	}
+	if (typeof statusCode === 'string') {
+		const parsed = Number.parseInt(statusCode, 10);
+		return Number.isNaN(parsed) ? undefined : parsed;
+	}
+	return undefined;
 }
 
 export async function revolutApiRequestWithFullResponse(

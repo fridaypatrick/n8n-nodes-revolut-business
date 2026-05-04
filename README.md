@@ -115,14 +115,15 @@ Copy that value.
 5. Paste the full contents of `.revolut/revolut-business-private-key.pem` into the **Private Key** field.
 6. Set the **JWT Issuer (iss)** to the exact issuer domain shown in Revolut Business API configuration (no `https://` scheme, no trailing slash).
 7. Paste the **Refresh Token** obtained in step 5 into the **Refresh Token** field.
-8. Set **Scopes** to the permissions your workflows need. Enter them as a comma-separated list (no spaces). For webhook management use at minimum:
-    ```
-    READ,EDIT
-    ```
-    - `READ` — list/get webhooks and failed events
-    - `EDIT` — create/update/delete webhooks and rotate signing secret
 
-    > **Sandbox note:** `npm run revolut:auth` converts this value into repeated `scope` URL parameters (`scope=READ&scope=EDIT`). This repeated-param format is what Revolut's sandbox authorization endpoint accepts. The credential field itself stays as `READ,EDIT`.
+> **Scopes are set at authorization time, not in the credential UI.** The permissions granted to a refresh token are determined by the `--scopes` flag passed to `npm run revolut:auth`. Changing any field in the n8n credential does not alter the scopes of an existing refresh token. For webhook management, always bootstrap with `READ,WRITE`:
+> ```bash
+> npm run revolut:auth -- --scopes READ,WRITE
+> ```
+> - `READ` — list/get webhooks and failed events
+> - `WRITE` — create/update/delete webhooks and rotate signing secret
+>
+> The n8n **Test** button refreshes the token and performs a read-only `GET /webhooks` check. It succeeds even without `WRITE`. Webhook auto-registration (`POST /webhooks`) requires `WRITE`; without it the trigger node returns `403 Forbidden` when activating a workflow.
 
 Do **not** click the n8n OAuth Connect button — authentication is driven by the refresh token you pasted.
 
@@ -360,14 +361,24 @@ Revolut may rotate the refresh token on each use or expire it after a period of 
 
 **Revolut rejects scopes / `invalid_scope` error**
 
-Scopes are case-sensitive. Enter them as `READ,EDIT` (comma-separated, no spaces) in the credential **Scopes** field.
+Scopes are set via the `--scopes` flag when running `npm run revolut:auth`, not in the n8n credential UI. Pass them as a comma-separated list (no spaces):
 
-`npm run revolut:auth` converts that value into repeated `scope` URL parameters before building the authorization URL:
-
-```
-...&scope=READ&scope=EDIT
+```bash
+npm run revolut:auth -- --scopes READ,WRITE
 ```
 
-This repeated-param format is what Revolut's sandbox endpoint requires. If Revolut rejects the scopes, inspect the authorization URL printed by the script and confirm it contains `scope=READ&scope=EDIT` — **not** the percent-encoded form `scope=READ%2CEDIT`. If the encoded form appears, the script is not expanding scopes correctly; check the `--scopes` flag value and the script version.
+The script passes scopes as a single comma-delimited `scope` parameter in the authorization URL:
 
-If the error persists after confirming the URL format, re-run `revolut:auth` with `--scopes READ,EDIT` to obtain a new refresh token issued with the correct scopes, then update the credential.
+```
+...&scope=READ,WRITE
+```
+
+If Revolut rejects the scopes, inspect the authorization URL printed by the script and confirm it contains `scope=READ,WRITE`. If the error persists, re-run `npm run revolut:auth -- --scopes READ,WRITE` to obtain a new refresh token issued with the correct scopes, then paste it into the credential **Refresh Token** field.
+
+**Trigger node returns `403 Forbidden` on workflow activation**
+
+The credential **Test** button refreshes the token and performs a read-only `GET /webhooks` check. It succeeds even without `WRITE`. Webhook auto-registration (POST /webhooks) requires the `WRITE` scope. If you see `403` when activating a workflow with **Register Webhook Automatically** enabled:
+
+1. Re-run `npm run revolut:auth -- --scopes READ,WRITE` to obtain a new refresh token issued with `WRITE`.
+2. Paste the new refresh token into the credential **Refresh Token** field and save.
+3. Reactivate the workflow.

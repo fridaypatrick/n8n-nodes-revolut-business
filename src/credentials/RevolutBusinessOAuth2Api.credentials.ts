@@ -71,13 +71,6 @@ export class RevolutBusinessOAuth2Api implements ICredentialType {
 			required: true,
 			description: 'Refresh token obtained with scripts/revolut-auth.mjs. Revolut may rotate this token; update it here if API calls start failing after a refresh.',
 		},
-		{
-			displayName: 'Scopes',
-			name: 'revolutScope',
-			type: 'string',
-			default: 'READ,EDIT',
-			description: 'Valid Revolut scopes are case-sensitive and comma-separated. READ,EDIT is required for webhook management.',
-		},
 	];
 
 	async authenticate(

@@ -74,12 +74,11 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 		],
 		properties: [
 			{
-				displayName: 'Webhook URL',
-				name: 'webhookUrl',
-				type: 'string',
-				default: '={{$webhookUrl}}',
-				disabledOptions: { show: { operation: ['manual'] } },
-				description: 'Use this generated n8n webhook URL when creating or updating the Revolut webhook',
+				displayName:
+					'n8n shows the actual test and production webhook URLs in the native Webhook URLs section. For manual Revolut webhook creation, use the production URL for active workflows.',
+				name: 'webhookUrlNotice',
+				type: 'notice',
+				default: '',
 			},
 			{
 				displayName: 'Events',

@@ -57,7 +57,7 @@ const kid = args.kid || process.env.REVOLUT_KID;
 const issuer = args.issuer || args['jwt-issuer'] || process.env.REVOLUT_JWT_ISSUER;
 const privateKeyPath = args['private-key-path'] || process.env.REVOLUT_PRIVATE_KEY_PATH;
 const redirectUri = args['redirect-uri'] || process.env.REVOLUT_REDIRECT_URI;
-const scopes = args.scopes || process.env.REVOLUT_SCOPES || 'READ,EDIT';
+const scopes = args.scopes || process.env.REVOLUT_SCOPES || 'READ,WRITE';
 
 if (!['sandbox', 'production'].includes(environment)) {
 	throw new Error('Environment must be sandbox or production.');
@@ -79,12 +79,14 @@ const auth = new URL(authorizeUrl(environment));
 auth.searchParams.set('client_id', clientId);
 auth.searchParams.set('redirect_uri', redirectUri);
 auth.searchParams.set('response_type', 'code');
-for (const scope of scopes.split(',').map((value) => value.trim()).filter(Boolean)) {
-	auth.searchParams.append('scope', scope);
-}
+const scope = scopes.split(',').map((value) => value.trim()).filter(Boolean).join(',');
+if (scope) auth.searchParams.set('scope', scope);
+const authUrl = scope
+	? auth.toString().replace(`scope=${encodeURIComponent(scope)}`, `scope=${scope.split(',').map(encodeURIComponent).join(',')}`)
+	: auth.toString();
 
 console.log('\nOpen this Revolut authorization URL:');
-console.log(auth.toString());
+console.log(authUrl);
 console.log('\nAfter approving, paste the callback URL or authorization code.');
 
 const rl = createInterface({ input, output });

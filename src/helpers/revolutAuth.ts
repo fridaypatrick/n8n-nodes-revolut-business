@@ -1,3 +1,5 @@
+import { createPrivateKey } from 'node:crypto';
+
 import jwt from 'jsonwebtoken';
 
 import type { RevolutEnvironment } from '../types/revolut';
@@ -34,6 +36,7 @@ export function getRevolutAuthorizeUrl(environment: RevolutEnvironment): string 
 export function createClientAssertionJwt(options: JwtAssertionOptions): string {
 	const now = Math.floor(Date.now() / 1000);
 	const issuer = options.issuer || options.clientId;
+	const privateKey = validatePrivateKeyForRs256(normalisePrivateKey(options.privateKey));
 
 	return jwt.sign(
 		{
@@ -43,7 +46,7 @@ export function createClientAssertionJwt(options: JwtAssertionOptions): string {
 			iat: now,
 			exp: now + 300,
 		},
-		options.privateKey,
+		privateKey,
 		{
 			algorithm: 'RS256',
 			keyid: options.kid,
@@ -51,8 +54,62 @@ export function createClientAssertionJwt(options: JwtAssertionOptions): string {
 	);
 }
 
-export function normalisePrivateKey(privateKey: string): string {
-	return privateKey.replace(/\\n/g, '\n').trim();
+export function normalisePrivateKey(privateKey?: string): string {
+	let normalized = (privateKey ?? '').trim();
+
+	if (hasMatchingSurroundingQuotes(normalized)) {
+		normalized = normalized.slice(1, -1).trim();
+	}
+
+	normalized = normalized.replace(/\\n/g, '\n').trim();
+	normalized = restorePemLineBreaks(normalized);
+
+	if (hasMatchingSurroundingQuotes(normalized)) {
+		normalized = normalized.slice(1, -1).trim();
+		normalized = restorePemLineBreaks(normalized);
+	}
+
+	return normalized;
+}
+
+function restorePemLineBreaks(value: string): string {
+	return value
+		.replace(/-----BEGIN ([A-Z ]+)-----\s+/g, '-----BEGIN $1-----\n')
+		.replace(/\s+-----END ([A-Z ]+)-----/g, '\n-----END $1-----');
+}
+
+function hasMatchingSurroundingQuotes(value: string): boolean {
+	if (value.length < 2) {
+		return false;
+	}
+
+	const first = value[0];
+	const last = value[value.length - 1];
+
+	return (first === '"' || first === "'") && first === last;
+}
+
+function validatePrivateKeyForRs256(privateKey: string): string {
+	if (!privateKey) {
+		throw new Error('Revolut private key is required. Paste the full PEM private key, including BEGIN PRIVATE KEY and END PRIVATE KEY lines.');
+	}
+
+	if (/-----BEGIN (?:CERTIFICATE|PUBLIC KEY|RSA PUBLIC KEY)-----/.test(privateKey)) {
+		throw new Error('Revolut private key must be a PEM private key, not a certificate or public key. Paste the private key generated for the Revolut Business API application.');
+	}
+
+	let keyObject;
+	try {
+		keyObject = createPrivateKey(privateKey);
+	} catch {
+		throw new Error('Revolut private key is not a valid PEM private key. Paste the full unencrypted private key, including BEGIN PRIVATE KEY and END PRIVATE KEY lines.');
+	}
+
+	if (keyObject.asymmetricKeyType !== 'rsa') {
+		throw new Error('Revolut private key must be an RSA private key suitable for RS256 client assertions. Generate or paste an RSA PEM private key.');
+	}
+
+	return privateKey;
 }
 
 export function buildTokenExchangeBody(options: RevolutTokenExchangeOptions): URLSearchParams {
