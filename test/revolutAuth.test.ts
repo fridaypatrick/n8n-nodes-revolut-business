@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
 import jwt from 'jsonwebtoken';
 
 import { RevolutBusinessOAuth2Api } from '../src/credentials/RevolutBusinessOAuth2Api.credentials';
-import { createClientAssertionJwt, getRevolutAuthorizeUrl, getRevolutTokenUrl } from '../src/helpers/revolutAuth';
+import { getCredentialEnvironment } from '../src/helpers/revolutApi';
+import { buildTokenExchangeBody, createClientAssertionJwt, getRevolutAuthorizeUrl, getRevolutTokenUrl, normalisePrivateKey } from '../src/helpers/revolutAuth';
 
 const privateKey = `-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC9h+H6fxyxXAyL
@@ -36,13 +38,43 @@ K5Hn7p5OQvqoZMpRr/ebhQ==
 -----END PRIVATE KEY-----`;
 
 test('builds sandbox token and authorize URLs', () => {
-	assert.equal(getRevolutTokenUrl('sandbox'), 'https://sandbox-business.revolut.com/api/1.0/auth/token');
+	assert.equal(getRevolutTokenUrl('sandbox'), 'https://sandbox-b2b.revolut.com/api/1.0/auth/token');
 	assert.equal(getRevolutAuthorizeUrl('sandbox'), 'https://sandbox-business.revolut.com/app-confirm');
 });
 
 test('builds production token and authorize URLs', () => {
-	assert.equal(getRevolutTokenUrl('production'), 'https://business.revolut.com/api/1.0/auth/token');
+	assert.equal(getRevolutTokenUrl('production'), 'https://b2b.revolut.com/api/1.0/auth/token');
 	assert.equal(getRevolutAuthorizeUrl('production'), 'https://business.revolut.com/app-confirm');
+});
+
+test('auth bootstrap script uses b2b token hosts and business authorize hosts', async () => {
+	const script = await readFile(new URL('../scripts/revolut-auth.mjs', import.meta.url), 'utf8');
+
+	assert.match(script, /https:\/\/sandbox-b2b\.revolut\.com\/api\/1\.0\/auth\/token/);
+	assert.match(script, /https:\/\/b2b\.revolut\.com\/api\/1\.0\/auth\/token/);
+	assert.match(script, /https:\/\/sandbox-business\.revolut\.com\/app-confirm/);
+	assert.match(script, /https:\/\/business\.revolut\.com\/app-confirm/);
+	assert.doesNotMatch(script, /https:\/\/sandbox-business\.revolut\.com\/api\/1\.0\/auth\/token/);
+	assert.doesNotMatch(script, /https:\/\/business\.revolut\.com\/api\/1\.0\/auth\/token/);
+});
+
+test('auth bootstrap script excludes client_id and redirect_uri from token body', async () => {
+	const script = await readFile(new URL('../scripts/revolut-auth.mjs', import.meta.url), 'utf8');
+	const bodyBlock = script.match(/const body = new URLSearchParams\(\{(?<body>[\s\S]*?)\}\);/)?.groups?.body;
+
+	assert.ok(bodyBlock, 'Expected token request body block in auth script');
+	assert.doesNotMatch(bodyBlock, /\bclient_id\b/);
+	assert.doesNotMatch(bodyBlock, /\bredirect_uri\b/);
+});
+
+test('auth bootstrap script appends comma-separated scopes as repeated query params', async () => {
+	const script = await readFile(new URL('../scripts/revolut-auth.mjs', import.meta.url), 'utf8');
+
+	assert.match(script, /scopes\.split\(',\'\)/);
+	assert.match(script, /\.map\(\(value\) => value\.trim\(\)\)/);
+	assert.match(script, /\.filter\(Boolean\)/);
+	assert.match(script, /auth\.searchParams\.append\('scope', scope\)/);
+	assert.doesNotMatch(script, /auth\.searchParams\.set\('scope'/);
 });
 
 test('creates a signed client assertion JWT', () => {
@@ -77,21 +109,25 @@ test('falls back JWT issuer to client ID when no issuer is provided', () => {
 	assert.equal(decoded.sub, 'test-client-id');
 });
 
-test('preAuthentication returns Revolut private_key_jwt token body parameters', async () => {
-	const credential = new RevolutBusinessOAuth2Api();
-	const payload = await credential.preAuthentication.call({} as never, {
+test('builds refresh-token private_key_jwt token body parameters', () => {
+	const payload = buildTokenExchangeBody({
+		grantType: 'refresh_token',
 		clientId: 'test-client-id',
 		privateKey,
 		environment: 'sandbox',
 		kid: 'kid-123',
-		jwtIssuer: 'configured-issuer.example.com',
+		issuer: 'configured-issuer.example.com',
+		refreshToken: 'refresh-token-123',
 	});
 
-	assert.equal(payload.client_id, 'test-client-id');
-	assert.equal(payload.client_assertion_type, 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
-	assert.equal(typeof payload.client_assertion, 'string');
+	assert.equal(payload.get('grant_type'), 'refresh_token');
+	assert.equal(payload.get('refresh_token'), 'refresh-token-123');
+	assert.equal(payload.has('client_id'), false);
+	assert.equal(payload.has('redirect_uri'), false);
+	assert.equal(payload.get('client_assertion_type'), 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+	assert.equal(typeof payload.get('client_assertion'), 'string');
 
-	const decoded = jwt.decode(payload.client_assertion as string, { complete: true }) as { header: { kid: string }; payload: { iss: string; sub: string; aud: string } };
+	const decoded = jwt.decode(payload.get('client_assertion') as string, { complete: true }) as { header: { kid: string }; payload: { iss: string; sub: string; aud: string } };
 
 	assert.equal(decoded.header.kid, 'kid-123');
 	assert.equal(decoded.payload.iss, 'configured-issuer.example.com');
@@ -99,15 +135,72 @@ test('preAuthentication returns Revolut private_key_jwt token body parameters', 
 	assert.equal(decoded.payload.aud, 'https://revolut.com');
 });
 
-test('credential maps visible Revolut scope into n8n OAuth2 scope field', () => {
+test('builds authorization-code private_key_jwt token body parameters', () => {
+	const payload = buildTokenExchangeBody({
+		grantType: 'authorization_code',
+		clientId: 'test-client-id',
+		privateKey,
+		kid: 'kid-123',
+		issuer: 'configured-issuer.example.com',
+		authorizationCode: 'auth-code-123',
+		redirectUri: 'https://n8n.example.com/rest/oauth2-credential/callback',
+	});
+
+	assert.equal(payload.get('grant_type'), 'authorization_code');
+	assert.equal(payload.get('code'), 'auth-code-123');
+	assert.equal(payload.has('redirect_uri'), false);
+	assert.equal(payload.has('client_id'), false);
+});
+
+test('normalises pasted private key escaped newlines', () => {
+	assert.equal(normalisePrivateKey('-----BEGIN-----\\nabc\\n-----END-----\n'), '-----BEGIN-----\nabc\n-----END-----');
+});
+
+test('credential keeps visible Revolut scope and removes generic OAuth2 scope field', () => {
 	const credential = new RevolutBusinessOAuth2Api();
 	const revolutScope = credential.properties.find((property) => property.name === 'revolutScope');
 	const oauthScope = credential.properties.find((property) => property.name === 'scope');
 
 	assert.equal(revolutScope?.type, 'string');
 	assert.equal(revolutScope?.default, 'READ,EDIT');
-	assert.equal(oauthScope?.type, 'hidden');
-	assert.equal(oauthScope?.default, '={{$self["revolutScope"]}}');
+	assert.equal(oauthScope, undefined);
+});
+
+test('credential exposes required refresh token password field', () => {
+	const credential = new RevolutBusinessOAuth2Api();
+	const refreshToken = credential.properties.find((property) => property.name === 'refreshToken');
+
+	assert.equal(refreshToken?.type, 'string');
+	assert.equal(refreshToken?.typeOptions?.password, true);
+	assert.equal(refreshToken?.required, true);
+});
+
+test('credential masks private key field while preserving rows', () => {
+	const credential = new RevolutBusinessOAuth2Api();
+	const privateKeyProperty = credential.properties.find((property) => property.name === 'privateKey');
+
+	assert.equal(privateKeyProperty?.type, 'string');
+	assert.equal(privateKeyProperty?.typeOptions?.rows, 6);
+	assert.equal(privateKeyProperty?.typeOptions?.password, true);
+	assert.equal(privateKeyProperty?.required, true);
+});
+
+test('credential environment lookup awaits asynchronous credentials', async () => {
+	const environment = await getCredentialEnvironment({
+		async getCredentials(credentialType: string) {
+			assert.equal(credentialType, 'revolutBusinessOAuth2Api');
+			return { environment: 'production' };
+		},
+	} as never);
+
+	assert.equal(environment, 'production');
+});
+
+test('credential no longer extends n8n generic OAuth2 flow', () => {
+	const credential = new RevolutBusinessOAuth2Api();
+
+	assert.equal(credential.extends, undefined);
+	assert.equal('preAuthentication' in credential, false);
 });
 
 test('credential exposes configured JWT issuer field', () => {

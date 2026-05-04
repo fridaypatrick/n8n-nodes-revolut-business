@@ -14,7 +14,12 @@
   "author": "Patrick Piatkowski",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "scripts/copy-assets.mjs",
+    "scripts/generate-certificate.mjs",
+    "scripts/revolut-auth.mjs",
+    "scripts/simulate-webhook.mjs",
+    "scripts/start-tunnel-compose.mjs"
   ],
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -27,6 +32,7 @@
     "generate:certificate": "node scripts/generate-certificate.mjs",
     "prepack": "npm run clean && npm run build",
     "release": "semantic-release",
+    "revolut:auth": "node scripts/revolut-auth.mjs",
     "simulate:webhook": "node scripts/simulate-webhook.mjs",
     "test": "tsx --test test/**/*.test.ts",
     "test:src": "tsx --test test/**/*.test.ts"

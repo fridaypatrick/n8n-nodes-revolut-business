@@ -8,7 +8,7 @@ n8n community node for Revolut Business API, sandbox-first development approach.
 
 ## Current Implemented Scope
 
-- **OAuth Credential**: Uses private_key_jwt assumptions with jsonwebtoken
+- **OAuth Credential**: Custom refresh-token credential using `private_key_jwt` with `jsonwebtoken`; bootstrapped via `npm run revolut:auth` helper script
 - **Webhook Management Node**: Create/get/list/update/delete/rotate signing secret/get failed events
 - **Webhook Trigger Node**: Handles incoming Revolut webhooks
 - **Local Development**: docker-compose setup for local n8n instance
@@ -19,7 +19,7 @@ n8n community node for Revolut Business API, sandbox-first development approach.
 - **Redirect URIs**: Revolut requires exact registered redirect URIs (no wildcards)
 - **Webhook Delivery**: localhost acceptable for OAuth sandbox callback but not real webhook delivery
 - **Signature Verification**: Currently best-effort, depends on raw request body access
-- **OAuth Flow**: Depends on n8n generic OAuth2 preAuthentication behavior for token exchange and refresh
+- **Auth Flow**: Does **not** use n8n generic OAuth2 Connect/callback. Revolut's `app-confirm` callback lacks `state`, so auth is bootstrapped manually via `npm run revolut:auth`; the resulting refresh token is pasted into the credential. The credential handles token refresh at runtime via `private_key_jwt` assertions without any n8n OAuth Connect button.
 
 ## Local Validation
 

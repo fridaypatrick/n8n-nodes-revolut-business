@@ -2,19 +2,18 @@ import type {
 	ICredentialDataDecryptedObject,
 	ICredentialTestRequest,
 	ICredentialType,
-	IDataObject,
-	IHttpRequestHelper,
+	IHttpRequestOptions,
 	INodeProperties,
 } from 'n8n-workflow';
+import { ApplicationError } from 'n8n-workflow';
 
-import { createClientAssertionJwt } from '../helpers/revolutAuth';
+import { buildTokenExchangeBody, getRevolutTokenUrl } from '../helpers/revolutAuth';
 
 export class RevolutBusinessOAuth2Api implements ICredentialType {
 	name = 'revolutBusinessOAuth2Api';
-	displayName = 'Revolut Business OAuth2 API';
+	displayName = 'Revolut Business API (Manual Refresh Token)';
 	icon = 'file:bank-icon.svg' as const;
 	documentationUrl = 'https://developer.revolut.com/docs/business/business-api';
-	extends = ['oAuth2Api'];
 	properties: INodeProperties[] = [
 		{
 			displayName: 'Environment',
@@ -35,17 +34,12 @@ export class RevolutBusinessOAuth2Api implements ICredentialType {
 			required: true,
 		},
 		{
-			displayName: 'Client Secret',
-			name: 'clientSecret',
-			type: 'hidden',
-			default: '',
-		},
-		{
 			displayName: 'Private Key (PEM)',
 			name: 'privateKey',
 			type: 'string',
 			typeOptions: {
 				rows: 6,
+				password: true,
 			},
 			default: '',
 			required: true,
@@ -67,50 +61,68 @@ export class RevolutBusinessOAuth2Api implements ICredentialType {
 			description: 'Issuer to send in the client assertion JWT iss claim. This must exactly match the issuer shown in your Revolut Business API configuration.',
 		},
 		{
+			displayName: 'Refresh Token',
+			name: 'refreshToken',
+			type: 'string',
+			typeOptions: {
+				password: true,
+			},
+			default: '',
+			required: true,
+			description: 'Refresh token obtained with scripts/revolut-auth.mjs. Revolut may rotate this token; update it here if API calls start failing after a refresh.',
+		},
+		{
 			displayName: 'Scopes',
 			name: 'revolutScope',
 			type: 'string',
 			default: 'READ,EDIT',
 			description: 'Valid Revolut scopes are case-sensitive and comma-separated. READ,EDIT is required for webhook management.',
 		},
-		{
-			displayName: 'Scope',
-			name: 'scope',
-			type: 'hidden',
-			default: '={{$self["revolutScope"]}}',
-		},
-		{
-			displayName: 'Auth URI',
-			name: 'authUrl',
-			type: 'hidden',
-			default: '={{$self["environment"] === "production" ? "https://business.revolut.com/app-confirm" : "https://sandbox-business.revolut.com/app-confirm"}}',
-		},
-		{
-			displayName: 'Access Token URI',
-			name: 'accessTokenUrl',
-			type: 'hidden',
-			default: '={{$self["environment"] === "production" ? "https://business.revolut.com/api/1.0/auth/token" : "https://sandbox-business.revolut.com/api/1.0/auth/token"}}',
-		},
-		{
-			displayName: 'Redirect URI Notes',
-			name: 'redirectUriNotes',
-			type: 'notice',
-			default: '',
-			description: 'n8n derives the OAuth callback URL from its hosting configuration. Revolut requires that exact redirect URI to be registered for the selected environment.',
-		},
-		{
-			displayName: 'Grant Type',
-			name: 'grantType',
-			type: 'hidden',
-			default: 'authorizationCode',
-		},
-		{
-			displayName: 'Authentication',
-			name: 'authentication',
-			type: 'hidden',
-			default: 'body',
-		},
 	];
+
+	async authenticate(
+		credentials: ICredentialDataDecryptedObject,
+		requestOptions: IHttpRequestOptions,
+	): Promise<IHttpRequestOptions> {
+		const environment = credentials.environment === 'production' ? 'production' : 'sandbox';
+		const tokenUrl = getRevolutTokenUrl(environment);
+
+		let response: Response;
+		try {
+			response = await fetch(tokenUrl, {
+				method: 'POST',
+				headers: { 'content-type': 'application/x-www-form-urlencoded' },
+				body: buildTokenExchangeBody({
+					grantType: 'refresh_token',
+					clientId: credentials.clientId as string,
+					issuer: (credentials.jwtIssuer as string) || undefined,
+					privateKey: credentials.privateKey as string,
+					kid: (credentials.kid as string) || undefined,
+					refreshToken: credentials.refreshToken as string,
+					environment,
+				}),
+			});
+		} catch (error) {
+			throw new ApplicationError(`Could not refresh Revolut Business access token: ${(error as Error).message}`, {
+				level: 'warning',
+			});
+		}
+
+		const tokenResponse = await response.json().catch(() => ({})) as { access_token?: string; error?: string; error_description?: string };
+		if (!response.ok || !tokenResponse.access_token) {
+			const detail = tokenResponse.error_description || tokenResponse.error || `HTTP ${response.status}`;
+			throw new ApplicationError(`Could not refresh Revolut Business access token (${detail}). Check that the refresh token is still valid and belongs to this client, and verify client ID, private key, issuer, and kid.`, {
+				level: 'warning',
+			});
+		}
+
+		requestOptions.headers = {
+			...(requestOptions.headers ?? {}),
+			Authorization: `Bearer ${tokenResponse.access_token}`,
+		};
+
+		return requestOptions;
+	}
 
 	test: ICredentialTestRequest = {
 		request: {
@@ -121,27 +133,4 @@ export class RevolutBusinessOAuth2Api implements ICredentialType {
 		},
 	};
 
-	// Limitation: this credential relies on n8n's generic OAuth2 flow calling preAuthentication for both
-	// the initial authorization-code exchange and refresh-token requests so we can inject a fresh
-	// private_key_jwt assertion each time. The hidden clientSecret field remains only because the shared
-	// oAuth2Api credential shape expects it, not because Revolut needs a static client secret here.
-	async preAuthentication(
-		this: IHttpRequestHelper,
-		credentials: ICredentialDataDecryptedObject,
-	): Promise<IDataObject> {
-		const environment = (credentials.environment as 'sandbox' | 'production' | undefined) ?? 'sandbox';
-		const clientAssertion = createClientAssertionJwt({
-			clientId: credentials.clientId as string,
-			issuer: (credentials.jwtIssuer as string) || undefined,
-			privateKey: credentials.privateKey as string,
-			kid: (credentials.kid as string) || undefined,
-			environment,
-		});
-
-		return {
-			client_id: credentials.clientId as string,
-			client_assertion: clientAssertion,
-			client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
-		};
-	}
 }

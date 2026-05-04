@@ -18,8 +18,8 @@ export function getBaseUrl(environment: RevolutEnvironment): string {
 	return REVOLUT_ENVIRONMENTS[environment];
 }
 
-export function getCredentialEnvironment(ctx: RequestContext, credentialType = 'revolutBusinessOAuth2Api'): RevolutEnvironment {
-	const data = ctx.getCredentials(credentialType) as { environment?: RevolutEnvironment };
+export async function getCredentialEnvironment(ctx: RequestContext, credentialType = 'revolutBusinessOAuth2Api'): Promise<RevolutEnvironment> {
+	const data = await ctx.getCredentials(credentialType) as { environment?: RevolutEnvironment };
 	return data.environment === 'production' ? 'production' : 'sandbox';
 }
 
@@ -31,19 +31,18 @@ export async function revolutApiRequest<T = IDataObject | IDataObject[]>(
 	qs?: IDataObject,
 	ignoreHttpStatusErrors = false,
 ): Promise<T> {
-	const environment = getCredentialEnvironment(ctx);
+	const environment = await getCredentialEnvironment(ctx);
 	const baseURL = getBaseUrl(environment);
 
 	try {
-		return await ctx.helpers.requestOAuth2.call(ctx, 'revolutBusinessOAuth2Api', {
+		return await ctx.helpers.httpRequestWithAuthentication.call(ctx, 'revolutBusinessOAuth2Api', {
 			method,
 			baseURL,
 			url: endpoint,
 			qs,
 			body,
-			json: true,
-			simple: !ignoreHttpStatusErrors,
-			resolveWithFullResponse: ignoreHttpStatusErrors,
+			returnFullResponse: ignoreHttpStatusErrors,
+			ignoreHttpStatusErrors,
 		});
 	} catch (error) {
 		throw new ApplicationError(`Revolut Business API request failed: ${(error as Error).message}`, {
