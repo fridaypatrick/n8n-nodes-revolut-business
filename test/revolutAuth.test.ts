@@ -81,6 +81,49 @@ test('auth bootstrap script sets comma-separated scopes as one query param', asy
 	assert.doesNotMatch(script, /auth\.searchParams\.append\('scope'/);
 });
 
+test('auth bootstrap script guards authorization code environment mismatches', async () => {
+	const script = await readFile(new URL('../scripts/revolut-auth.mjs', import.meta.url), 'utf8');
+
+	assert.match(script, /function expectedEnvironmentFromCode\(code\)/);
+	assert.match(script, /code\.startsWith\('oa_prod_'\)/);
+	assert.match(script, /assertCodeMatchesEnvironment\(code, environment\)/);
+	assert.match(script, /Re-run with --environment \$\{expectedEnvironment\}/);
+});
+
+test('auth bootstrap script includes safe token error diagnostics with redaction', async () => {
+	const script = await readFile(new URL('../scripts/revolut-auth.mjs', import.meta.url), 'utf8');
+
+	assert.match(script, /function safeTokenErrorDetail\(token, rawText, responseStatus, issuer\)/);
+	assert.match(script, /error_description/);
+	assert.match(script, /response body excerpt/);
+	assert.match(script, /redacted authorization code/);
+	assert.match(script, /redacted jwt\/token/);
+	assert.match(script, /redacted private key/);
+	assert.match(script, /Token exchange failed \(\$\{response\.status\}\): \$\{safeTokenErrorDetail\(token, rawTokenResponse, response\.status, issuer\)\}/);
+});
+
+test('auth bootstrap script hints at JWT issuer for likely client assertion failures', async () => {
+	const script = await readFile(new URL('../scripts/revolut-auth.mjs', import.meta.url), 'utf8');
+
+	assert.match(script, /function shouldSuggestClientAssertionSettings\(responseStatus, token\)/);
+	assert.match(script, /responseStatus === 401/);
+	assert.match(script, /invalid_client/);
+	assert.match(script, /unauthorized/);
+	assert.match(script, /check JWT issuer\/client assertion settings/);
+	assert.match(script, /registered Revolut application domain only/);
+	assert.match(script, /no https:\/\//);
+	assert.match(script, /no path/);
+	assert.match(script, /no trailing slash/);
+	assert.match(script, /Configured JWT issuer/);
+});
+
+test('auth bootstrap script redacts sensitive values before including issuer hint', async () => {
+	const script = await readFile(new URL('../scripts/revolut-auth.mjs', import.meta.url), 'utf8');
+
+	assert.match(script, /issuer \? ` Configured JWT issuer: \$\{redactSensitiveValue\(issuer\)\.slice\(0, 300\)\}\.`/);
+	assert.doesNotMatch(script, /Configured JWT issuer: \$\{issuer\}/);
+});
+
 test('creates a signed client assertion JWT', () => {
 	const token = createClientAssertionJwt({
 		clientId: 'test-client-id',

@@ -50,6 +50,64 @@ function extractCode(inputValue) {
 	}
 }
 
+function expectedEnvironmentFromCode(code) {
+	if (code.startsWith('oa_prod_')) return 'production';
+	if (code.startsWith('oa_sandbox_') || code.startsWith('oa_sand_')) return 'sandbox';
+	return undefined;
+}
+
+function assertCodeMatchesEnvironment(code, environment) {
+	const expectedEnvironment = expectedEnvironmentFromCode(code);
+	if (!expectedEnvironment || expectedEnvironment === environment) return;
+
+	throw new Error(
+		`Authorization code appears to be for ${expectedEnvironment}, but this helper is using ${environment}. `
+		+ `Re-run with --environment ${expectedEnvironment} or generate a new ${environment} authorization code.`,
+	);
+}
+
+function redactSensitiveValue(value) {
+	return String(value)
+		.replace(/oa_(?:prod|sandbox|sand)_[A-Za-z0-9._~+/=-]+/g, '[redacted authorization code]')
+		.replace(/eyJ[A-Za-z0-9._~+/=-]+/g, '[redacted jwt/token]')
+		.replace(/-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g, '[redacted private key]');
+}
+
+function shouldSuggestClientAssertionSettings(responseStatus, token) {
+	if (responseStatus === 401) return true;
+
+	const values = [token?.error, token?.error_description, token?.message, token?.code, token?.type]
+		.filter((value) => typeof value === 'string')
+		.map((value) => value.toLowerCase());
+
+	return values.some((value) => value.includes('invalid_client') || value.includes('unauthorized'));
+}
+
+function clientAssertionSettingsHint(issuer) {
+	const configuredIssuer = issuer ? ` Configured JWT issuer: ${redactSensitiveValue(issuer).slice(0, 300)}.` : '';
+	return 'Hint: check JWT issuer/client assertion settings. For Revolut, the JWT issuer (iss) should be the registered Revolut application domain only, with no https://, no path, and no trailing slash.'
+		+ configuredIssuer;
+}
+
+function safeTokenErrorDetail(token, rawText, responseStatus, issuer) {
+	const fields = ['error', 'error_description', 'errorMessage', 'message', 'code', 'type'];
+	const details = fields
+		.map((field) => [field, token?.[field]])
+		.filter(([, value]) => typeof value === 'string' && value.trim())
+		.map(([field, value]) => `${field}=${redactSensitiveValue(value).slice(0, 300)}`);
+
+	const detail = details.length
+		? details.join('; ')
+		: (() => {
+			const excerpt = redactSensitiveValue(rawText || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+			return excerpt ? `response body excerpt=${excerpt}` : 'Unknown error';
+		})();
+
+	return shouldSuggestClientAssertionSettings(responseStatus, token)
+		? `${detail}. ${clientAssertionSettingsHint(issuer)}`
+		: detail;
+}
+
 const args = parseArgs(process.argv.slice(2));
 const environment = args.environment || process.env.REVOLUT_ENVIRONMENT || 'sandbox';
 const clientId = args['client-id'] || process.env.REVOLUT_CLIENT_ID;
@@ -95,6 +153,7 @@ rl.close();
 
 const code = extractCode(pasted);
 if (!code) throw new Error('No authorization code provided.');
+assertCodeMatchesEnvironment(code, environment);
 
 const body = new URLSearchParams({
 	grant_type: 'authorization_code',
@@ -109,9 +168,15 @@ const response = await fetch(tokenUrl(environment), {
 	body: body,
 });
 
-const token = await response.json().catch(() => ({}));
+const rawTokenResponse = await response.text();
+let token = {};
+try {
+	token = JSON.parse(rawTokenResponse || '{}');
+} catch {
+	// Non-JSON error bodies are handled by safeTokenErrorDetail below.
+}
 if (!response.ok) {
-	throw new Error(`Token exchange failed (${response.status}): ${token.error_description || token.error || 'Unknown error'}`);
+	throw new Error(`Token exchange failed (${response.status}): ${safeTokenErrorDetail(token, rawTokenResponse, response.status, issuer)}`);
 }
 
 console.log('\nToken exchange succeeded. Store this refresh token in the n8n credential:');
