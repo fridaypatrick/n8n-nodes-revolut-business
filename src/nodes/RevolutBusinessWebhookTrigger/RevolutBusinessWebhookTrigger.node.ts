@@ -29,7 +29,55 @@ function readStoredWebhookState(nodeData: IDataObject): StoredRevolutWebhookLife
 		id: candidate.id,
 		url: candidate.url,
 		events: candidate.events.filter((event): event is string => typeof event === 'string'),
+		signingSecret: typeof candidate.signingSecret === 'string' ? candidate.signingSecret : undefined,
 	};
+}
+
+function getWebhookSigningSecret(webhook: Pick<RevolutWebhook, 'signing_secret'>): string | undefined {
+	return typeof webhook.signing_secret === 'string' && webhook.signing_secret ? webhook.signing_secret : undefined;
+}
+
+export function getStoredSigningSecret(nodeData: IDataObject): string | undefined {
+	return readStoredWebhookState(nodeData)?.signingSecret;
+}
+
+export function shouldVerifyWebhookSignature(registerWebhook: boolean, manualVerifySignature: boolean): boolean {
+	return registerWebhook || manualVerifySignature;
+}
+
+export function getSigningSecretForWebhookVerification(
+	registerWebhook: boolean,
+	nodeData: IDataObject,
+	manualSigningSecret: string,
+	node?: ReturnType<IHookFunctions['getNode']>,
+): string | undefined {
+	if (!registerWebhook) {
+		return manualSigningSecret;
+	}
+
+	const signingSecret = getStoredSigningSecret(nodeData);
+	if (!signingSecret) {
+		const message = 'Automatically registered Revolut webhook signatures must be verified, but no signing secret is stored. Deactivate and reactivate this workflow, or retrieve/rotate the webhook signing secret in Revolut and recreate the registration.';
+		throw node ? new NodeOperationError(node, message) : new Error(message);
+	}
+
+	return signingSecret;
+}
+
+export function assertAutoRegisteredSigningSecret(
+	state: StoredRevolutWebhookLifecycle,
+	node?: ReturnType<IHookFunctions['getNode']>,
+): StoredRevolutWebhookLifecycle {
+	if (hasPersistableSigningSecret(state)) {
+		return state;
+	}
+
+	const message = 'Automatic signature verification requires Revolut to return a webhook signing secret during activation. Delete and recreate the Revolut webhook, or disable automatic registration and configure manual signature verification with the signing secret.';
+	throw node ? new NodeOperationError(node, message) : new Error(message);
+}
+
+export function hasPersistableSigningSecret(state: Pick<StoredRevolutWebhookLifecycle, 'signingSecret'>): boolean {
+	return typeof state.signingSecret === 'string' && state.signingSecret.length > 0;
 }
 
 async function findWebhookByUrl(this: IHookFunctions, webhookUrl: string): Promise<RevolutWebhook | undefined> {
@@ -184,11 +232,27 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 				},
 			},
 			{
+				displayName: 'Automatically registered Revolut webhooks always verify signatures using the signing secret returned by Revolut.',
+				name: 'automaticSignatureVerificationNotice',
+				type: 'notice',
+				default: '',
+				displayOptions: {
+					show: {
+						registerWebhook: [true],
+					},
+				},
+			},
+			{
 				displayName: 'Verify Signature',
 				name: 'verifySignature',
 				type: 'boolean',
 				default: false,
 				description: 'Best-effort HMAC verification. Exact Revolut signature header format is assumed and documented in README.',
+				displayOptions: {
+					show: {
+						registerWebhook: [false],
+					},
+				},
 			},
 			{
 				displayName: 'Signing Secret',
@@ -200,6 +264,7 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 				},
 				displayOptions: {
 					show: {
+						registerWebhook: [false],
 						verifySignature: [true],
 					},
 				},
@@ -211,14 +276,16 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 		const body = (this.getBodyData() ?? {}) as IDataObject;
 		const headers = normaliseWebhookHeaders(this.getHeaderData() as JsonObject);
 		const rawBody = this.getRequestObject().rawBody?.toString();
-		const verifySignature = this.getNodeParameter('verifySignature') as boolean;
+		const registerWebhook = this.getNodeParameter('registerWebhook') as boolean;
+		const manualVerifySignature = registerWebhook ? false : this.getNodeParameter('verifySignature') as boolean;
+		const verifySignature = shouldVerifyWebhookSignature(registerWebhook, manualVerifySignature);
 
 		let signature: IDataObject = { verified: false, skipped: true };
 		if (verifySignature) {
 			if (!rawBody) {
 				throw new NodeOperationError(this.getNode(), 'Webhook signature verification requires the raw request body, but it was not available from n8n for this request');
 			}
-			const signingSecret = this.getNodeParameter('signingSecret') as string;
+			const signingSecret = getSigningSecretForWebhookVerification(registerWebhook, this.getWorkflowStaticData('node'), this.getNodeParameter('signingSecret') as string, this.getNode());
 			signature = verifyWebhookSignature(rawBody, signingSecret, headers) as unknown as IDataObject;
 			if (!signature.verified) {
 				throw new NodeOperationError(this.getNode(), `Webhook signature verification failed: ${String(signature.reason ?? 'unknown reason')}`);
@@ -263,11 +330,12 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 					return false;
 				}
 
-				storeWebhookState.call(this, {
+				storeWebhookState.call(this, assertAutoRegisteredSigningSecret({
 					id: existing.id,
 					url: existing.url,
 					events: Array.isArray(existing.events) ? [...existing.events] : [],
-				});
+					signingSecret: getWebhookSigningSecret(existing) ?? stored.signingSecret,
+				}, this.getNode()));
 
 				return true;
 			},
@@ -284,11 +352,12 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 				if (stored?.id && stored.url === webhookUrl) {
 					const existingByUrl = await findWebhookByUrl.call(this, webhookUrl);
 					if (existingByUrl?.id === stored.id) {
-						storeWebhookState.call(this, {
+						storeWebhookState.call(this, assertAutoRegisteredSigningSecret({
 							id: existingByUrl.id,
 							url: existingByUrl.url,
 							events: Array.isArray(existingByUrl.events) ? [...existingByUrl.events] : events,
-						});
+							signingSecret: getWebhookSigningSecret(existingByUrl) ?? stored.signingSecret,
+						}, this.getNode()));
 						return true;
 					}
 				}
@@ -303,24 +372,37 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 
 				const existingByUrl = await findWebhookByUrl.call(this, webhookUrl);
 				if (existingByUrl) {
-					storeWebhookState.call(this, {
+					storeWebhookState.call(this, assertAutoRegisteredSigningSecret({
 						id: existingByUrl.id,
 						url: existingByUrl.url,
 						events: Array.isArray(existingByUrl.events) ? [...existingByUrl.events] : events,
-					});
+						signingSecret: getWebhookSigningSecret(existingByUrl),
+					}, this.getNode()));
 					return true;
 				}
 
-				const response = await revolutApiRequest<{ id: string }>(this, 'POST', '/webhooks', {
+				const response = await revolutApiRequest<{ id: string; signing_secret?: string }>(this, 'POST', '/webhooks', {
 					url: webhookUrl,
 					...(events.length ? { events } : {}),
 				});
-
-				storeWebhookState.call(this, {
+				const createdState = {
 					id: response.id,
 					url: webhookUrl,
 					events,
-				});
+					signingSecret: getWebhookSigningSecret(response),
+				};
+				if (!hasPersistableSigningSecret(createdState)) {
+					try {
+						const deleteResponse = await revolutApiRequestWithFullResponse(this, 'DELETE', `/webhooks/${response.id}`);
+						if (deleteResponse.statusCode !== 204 && !isNotFoundResponse(deleteResponse)) {
+							// Prefer the actionable signing-secret activation failure below over a cleanup-only error.
+						}
+					} catch {
+						// Best-effort cleanup only; keep the root signing-secret failure actionable.
+					}
+				}
+
+				storeWebhookState.call(this, assertAutoRegisteredSigningSecret(createdState, this.getNode()));
 				return true;
 			},
 			async delete(this: IHookFunctions) {

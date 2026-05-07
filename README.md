@@ -139,8 +139,8 @@ Do **not** click the n8n OAuth Connect button — authentication is driven by th
 > - Always serve the webhook endpoint over **HTTPS**. Revolut will not deliver events to plain HTTP in production.
 > - Restrict access to the n8n editor UI (firewall, VPN, or basic auth). Do not expose the editor to the public internet.
 > - Do not expose unnecessary n8n paths; only the webhook path used by Revolut needs to be publicly reachable.
-> - Enable **signature verification** in the trigger node and keep the signing secret confidential. If the secret is leaked, rotate it immediately via the node or Revolut dashboard.
-> - The trigger verifies signatures against the **raw request body**. Do not place a proxy in front of n8n that re-encodes or modifies the body before it reaches n8n, as this breaks verification.
+> - In **auto-register mode** the trigger always verifies incoming signatures using the Revolut-generated signing secret stored at activation time — no manual setup is required. In **manual mode** (auto-register disabled), enable **Verify Signature** and provide the signing secret in the trigger node. Keep the signing secret confidential; if leaked, rotate it immediately via the Revolut Business node or Revolut dashboard, then deactivate/reactivate the workflow (auto-register) or update the **Signing Secret** field (manual) to resume verification.
+> - The trigger verifies signatures against the **raw request body**. Any proxy or gateway in front of n8n must forward the raw body and the `revolut-signature`/`x-revolut-signature` header unmodified — re-encoding or buffering the body breaks automatic verification.
 > - Apply network-level controls (IP allowlisting, WAF rules) where your infrastructure supports it.
 
 ---
@@ -296,16 +296,18 @@ docker compose up
 ## Trigger node usage
 
 1. Add **Revolut Business Trigger**.
-2. Decide whether to enable **Register Webhook Automatically**.
-3. If enabled, activate the workflow so the node creates the webhook via API.
-4. Optionally enable signature verification and paste the webhook signing secret.
+2. Decide whether to enable **Register Webhook Automatically** (default: on).
+3. If enabled, activate the workflow — the node calls `POST /webhooks`, stores the returned webhook ID and Revolut-generated signing secret in workflow static data, and **always verifies** every incoming event signature automatically. The **Verify Signature** toggle and **Signing Secret** field are not used in this mode.
+4. If auto-register is **disabled** (manual mode), manage the webhook outside n8n. Enable **Verify Signature** and paste the webhook's signing secret into the **Signing Secret** field to verify incoming requests.
+
+> **Sandbox:** Sandbox and production Revolut webhooks both return signing secrets and emit verifiable signatures. Auto-register mode works identically in both environments — no additional configuration is required for sandbox testing.
 
 Activation/deactivation notes:
 
-- The trigger stores only minimal webhook lifecycle metadata locally (`id`, `url`, `events`).
-- It does not persist Revolut `signing_secret` values in workflow static data or any other non-credential storage.
+- The trigger stores webhook lifecycle metadata (`id`, `url`, `events`) and the auto-registration signing secret in workflow static data (`node`-scoped).
+- **Treat workflow exports and static-data backups as sensitive** — the signing secret is included. Restrict access to exported workflow JSON files accordingly.
 - Activation reuses an existing remote webhook when one already exists for the same n8n URL, instead of always creating a duplicate.
-- Deactivation tolerates a remote `404` and still clears local lifecycle state.
+- Deactivation tolerates a remote `404` and still clears local lifecycle state including the stored signing secret.
 
 ### Gateway / reverse-proxy: Public Webhook URL Template
 
@@ -350,22 +352,26 @@ REVOLUT_EVENT=TransactionCreated \
 npm run simulate:webhook
 ```
 
-## Signature verification assumption
+## Signature verification
 
-Revolut signature verification is implemented behind a dedicated helper and currently assumes:
+**Auto-register mode:** Verification is always enabled. The trigger uses the Revolut-generated signing secret stored in workflow static data at activation time and verifies every incoming event automatically — no manual configuration is required.
 
-- signature header is `revolut-signature` or `x-revolut-signature`
-- signature value is a lowercase hex HMAC-SHA256 digest
-- digest input is the raw request body
+**Manual mode** (auto-register disabled): Enable **Verify Signature** in the node parameters and paste the webhook signing secret into the **Signing Secret** field.
 
-Verification fails closed when n8n does not expose the raw request body for the incoming webhook request. In that case the trigger returns a clear error rather than attempting to verify a reserialized JSON body.
+**Algorithm assumptions** (both modes):
 
-If Revolut documents a different header name or encoding for your account/version, adjust `src/helpers/webhookSignature.ts`.
+- Signature header: `revolut-signature` or `x-revolut-signature`
+- Signature value: lowercase hex HMAC-SHA256 digest
+- Digest input: raw request body
+
+Verification fails closed — if n8n does not expose the raw request body, the trigger returns a clear error rather than attempting to verify a re-serialized JSON body.
+
+If Revolut documents a different header name or encoding for your account or API version, adjust `src/helpers/webhookSignature.ts`.
 
 ## Limitations / TODO
 
 - Automatic webhook registration assumes the standard n8n trigger lifecycle for activation/deactivation.
-- Signature verification is best-effort until header/encoding details are fully confirmed from live traffic or newer docs.
+- Signature verification algorithm assumptions (header name, encoding) are based on available docs; adjust `src/helpers/webhookSignature.ts` if Revolut changes the format.
 - This scaffold does not yet implement additional Business API resources beyond webhooks.
 
 ## Troubleshooting
@@ -410,3 +416,10 @@ The credential **Test** button refreshes the token and performs a read-only `GET
 1. Re-run `npm run revolut:auth -- --scopes READ,WRITE` to obtain a new refresh token issued with `WRITE`.
 2. Paste the new refresh token into the credential **Refresh Token** field and save.
 3. Reactivate the workflow.
+
+**Webhook signature verification fails after rotating the signing secret**
+
+If you rotated the webhook signing secret outside n8n (via the Revolut Business node **Rotate Signing Secret** operation or the Revolut dashboard), the signing secret stored in workflow static data is now stale.
+
+- **Auto-register mode:** Deactivate the workflow, then reactivate it. Reactivation re-registers the webhook and stores the new signing secret automatically.
+- **Manual mode:** Open the trigger node, paste the new signing secret into the **Signing Secret** field, and save the workflow.

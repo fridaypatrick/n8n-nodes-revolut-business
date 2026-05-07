@@ -2,10 +2,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+	assertAutoRegisteredSigningSecret,
 	extractWebhookIdFromUrl,
+	getSigningSecretForWebhookVerification,
+	getStoredSigningSecret,
 	hasWebhookUrlDrift,
+	hasPersistableSigningSecret,
 	isN8nTestWebhookUrl,
+	RevolutBusinessWebhookTrigger,
 	resolvePublicWebhookUrl,
+	shouldVerifyWebhookSignature,
 } from '../src/nodes/RevolutBusinessWebhookTrigger/RevolutBusinessWebhookTrigger.node';
 
 test('extracts webhook id from production webhook url', () => {
@@ -111,4 +117,60 @@ test('requires resolved public webhook url to use https', () => {
 		),
 		/must use HTTPS/,
 	);
+});
+
+test('automatic registration always requires signature verification', () => {
+	assert.equal(shouldVerifyWebhookSignature(true, false), true);
+	assert.equal(shouldVerifyWebhookSignature(true, true), true);
+	assert.equal(shouldVerifyWebhookSignature(false, true), true);
+	assert.equal(shouldVerifyWebhookSignature(false, false), false);
+});
+
+test('reads stored automatic signing secret from lifecycle state', () => {
+	assert.equal(getStoredSigningSecret({}), undefined);
+	assert.equal(getStoredSigningSecret({ revolutWebhook: { id: 'hook-id', url: 'https://example.com', events: [], signingSecret: 'secret' } }), 'secret');
+});
+
+test('fails closed when automatic registration has no stored signing secret', () => {
+	assert.throws(
+		() => getSigningSecretForWebhookVerification(true, { revolutWebhook: { id: 'hook-id', url: 'https://example.com', events: [] } }, ''),
+		/no signing secret is stored/,
+	);
+});
+
+test('uses stored signing secret for automatic registration and manual secret otherwise', () => {
+	assert.equal(
+		getSigningSecretForWebhookVerification(true, { revolutWebhook: { id: 'hook-id', url: 'https://example.com', events: [], signingSecret: 'stored-secret' } }, 'manual-secret'),
+		'stored-secret',
+	);
+	assert.equal(getSigningSecretForWebhookVerification(false, {}, 'manual-secret'), 'manual-secret');
+});
+
+test('activation fails when automatic registration cannot persist a signing secret', () => {
+	assert.throws(
+		() => assertAutoRegisteredSigningSecret({ id: 'hook-id', url: 'https://example.com', events: [] }),
+		/Automatic signature verification requires Revolut to return a webhook signing secret/,
+	);
+});
+
+test('activation accepts automatic registration state with persisted signing secret', () => {
+	const state = { id: 'hook-id', url: 'https://example.com', events: [], signingSecret: 'stored-secret' };
+	assert.equal(assertAutoRegisteredSigningSecret(state), state);
+});
+
+test('created webhook state without signing secret is not persistable', () => {
+	assert.equal(hasPersistableSigningSecret({ signingSecret: undefined }), false);
+	assert.equal(hasPersistableSigningSecret({ signingSecret: '' }), false);
+	assert.equal(hasPersistableSigningSecret({ signingSecret: 'stored-secret' }), true);
+});
+
+test('trigger hides manual signature fields while automatic registration is enabled', () => {
+	const properties = new RevolutBusinessWebhookTrigger().description.properties;
+	const verifySignature = properties.find((property) => property.name === 'verifySignature');
+	const signingSecret = properties.find((property) => property.name === 'signingSecret');
+	const autoNotice = properties.find((property) => property.name === 'automaticSignatureVerificationNotice');
+
+	assert.deepEqual(verifySignature?.displayOptions, { show: { registerWebhook: [false] } });
+	assert.deepEqual(signingSecret?.displayOptions, { show: { registerWebhook: [false], verifySignature: [true] } });
+	assert.deepEqual(autoNotice?.displayOptions, { show: { registerWebhook: [true] } });
 });

@@ -14,6 +14,26 @@ test('verifies matching HMAC signature', () => {
 	assert.equal(result.verified, true);
 });
 
+test('verifies official v1 Revolut signature header format', () => {
+	const rawBody = JSON.stringify({ event: 'TransactionCreated' });
+	const secret = 'wsk_test_secret';
+	const signature = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+
+	const result = verifyWebhookSignature(rawBody, secret, { 'revolut-signature': `v1=${signature}` });
+
+	assert.equal(result.verified, true);
+});
+
+test('verifies one of multiple comma-separated Revolut signatures', () => {
+	const rawBody = JSON.stringify({ event: 'TransactionCreated' });
+	const secret = 'wsk_test_secret';
+	const signature = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+
+	const result = verifyWebhookSignature(rawBody, secret, { 'revolut-signature': `v1=bad, v1=${signature}` });
+
+	assert.equal(result.verified, true);
+});
+
 test('fails when signature header is missing', () => {
 	const result = verifyWebhookSignature('{}', 'wsk_test_secret', {});
 	assert.equal(result.verified, false);
