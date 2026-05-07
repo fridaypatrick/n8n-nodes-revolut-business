@@ -10,3 +10,4 @@ n8n_data/
 *.pem
 *.crt
 *.csr
+n8n-nodes-revolut-business-*.tgz
