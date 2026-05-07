@@ -307,6 +307,34 @@ Activation/deactivation notes:
 - Activation reuses an existing remote webhook when one already exists for the same n8n URL, instead of always creating a duplicate.
 - Deactivation tolerates a remote `404` and still clears local lifecycle state.
 
+### Gateway / reverse-proxy: Public Webhook URL Template
+
+If n8n sits behind a gateway or reverse proxy that rewrites the external webhook path before it reaches n8n (e.g. `/hooks/revolut-business/<id>` → `/webhook/<id>/revolut-business`), set the **Public Webhook URL Template** field to the external URL pattern your gateway exposes.
+
+**Format:** full HTTPS URL containing exactly one `{webhookId}` placeholder.
+
+**Example:**
+
+```
+https://n8n-hooks.whale-gorgon.ts.net/hooks/revolut-business/{webhookId}
+```
+
+At production activation the node replaces `{webhookId}` with n8n's generated webhook ID and registers the resulting URL with Revolut.
+
+**Constraints:**
+
+- Must be HTTPS.
+- Must contain exactly one `{webhookId}` placeholder.
+- Applies to **production activation only** — the Test trigger always uses n8n's native test URL regardless of this field.
+- Leave the field empty to use the n8n-generated URL directly (default; no override applied).
+
+**Gateway requirements** (also apply when using any proxy in front of n8n):
+
+- The gateway must forward the raw request body to n8n **unmodified**. Re-encoding or buffering the body breaks Revolut signature verification.
+- The `revolut-signature` (or `x-revolut-signature`) header must be forwarded intact.
+
+See the **Security** callout above for additional proxy constraints.
+
 ## Simulate a webhook locally
 
 ```bash

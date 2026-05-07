@@ -45,6 +45,81 @@ function clearWebhookState(this: IHookFunctions): void {
 	delete this.getWorkflowStaticData('node').revolutWebhook;
 }
 
+function createTemplateError(node: ReturnType<IHookFunctions['getNode']> | undefined, message: string): Error {
+	return node ? new NodeOperationError(node, message) : new Error(message);
+}
+
+export function extractWebhookIdFromUrl(webhookUrl: string): string | undefined {
+	try {
+		const pathname = new URL(webhookUrl).pathname;
+		return pathname.match(/\/webhook(?:-test)?\/([^/]+)/)?.[1];
+	} catch {
+		return undefined;
+	}
+}
+
+export function isN8nTestWebhookUrl(webhookUrl: string): boolean {
+	// n8n does not expose a separate hook lifecycle flag here, so keep test-mode detection centralized.
+	return webhookUrl.includes('/webhook-test/');
+}
+
+export function hasWebhookUrlDrift(storedUrl: string, desiredUrl: string): boolean {
+	return storedUrl !== desiredUrl;
+}
+
+export function resolvePublicWebhookUrl(
+	nativeWebhookUrl: string,
+	publicWebhookUrlTemplate: string | undefined,
+	nodeWebhookId?: string,
+	node?: ReturnType<IHookFunctions['getNode']>,
+): string {
+	const template = publicWebhookUrlTemplate?.trim();
+	if (!template || isN8nTestWebhookUrl(nativeWebhookUrl)) {
+		return nativeWebhookUrl;
+	}
+
+	const braceTokens = template.match(/\{[^}]*\}/g) ?? [];
+	const webhookIdTokens = braceTokens.filter((token) => token === '{webhookId}');
+	if (braceTokens.some((token) => token !== '{webhookId}')) {
+		throw createTemplateError(node, 'Public Webhook URL Template only supports the {webhookId} placeholder');
+	}
+	if (webhookIdTokens.length !== 1) {
+		throw createTemplateError(node, 'Public Webhook URL Template must contain exactly one {webhookId} placeholder');
+	}
+
+	const webhookId = nodeWebhookId || extractWebhookIdFromUrl(nativeWebhookUrl);
+	if (!webhookId) {
+		throw createTemplateError(node, 'Could not determine the n8n webhook ID for the Public Webhook URL Template');
+	}
+
+	const resolvedUrl = template.replace('{webhookId}', webhookId);
+	let parsed: URL;
+	try {
+		parsed = new URL(resolvedUrl);
+	} catch {
+		throw createTemplateError(node, 'Resolved Public Webhook URL Template must be a valid HTTPS URL');
+	}
+	if (parsed.protocol !== 'https:') {
+		throw createTemplateError(node, 'Resolved Public Webhook URL Template must use HTTPS');
+	}
+
+	return resolvedUrl;
+}
+
+function getEffectiveWebhookUrl(this: IHookFunctions): string {
+	const nativeWebhookUrl = this.getNodeWebhookUrl('default');
+	if (!nativeWebhookUrl) {
+		throw new NodeOperationError(this.getNode(), 'Could not determine the n8n webhook URL for this trigger');
+	}
+
+	return resolvePublicWebhookUrl(
+		nativeWebhookUrl,
+		this.getNodeParameter('publicWebhookUrlTemplate', '') as string,
+		this.getNode().webhookId,
+		this.getNode(),
+	);
+}
+
 export class RevolutBusinessWebhookTrigger implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Revolut Business Trigger',
@@ -94,6 +169,19 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 				type: 'boolean',
 				default: true,
 				description: 'When enabled, activation creates a Revolut webhook pointing to this n8n URL',
+			},
+			{
+				displayName: 'Public Webhook URL Template',
+				name: 'publicWebhookUrlTemplate',
+				type: 'string',
+				default: '',
+				placeholder: 'https://example.com/hooks/revolut-business/{webhookId}',
+				description: 'Optional production-only public URL template registered with Revolut. Must contain exactly one {webhookId} placeholder and resolve to HTTPS. Test webhooks keep using n8n\'s native test URL.',
+				displayOptions: {
+					show: {
+						registerWebhook: [true],
+					},
+				},
 			},
 			{
 				displayName: 'Verify Signature',
@@ -164,6 +252,11 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 					return false;
 				}
 
+				const desiredUrl = getEffectiveWebhookUrl.call(this);
+				if (hasWebhookUrlDrift(stored.url, desiredUrl)) {
+					return false;
+				}
+
 				const existing = await findWebhookByUrl.call(this, stored.url);
 				if (!existing) {
 					clearWebhookState.call(this);
@@ -185,10 +278,7 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 					return true;
 				}
 
-				const webhookUrl = this.getNodeWebhookUrl('default');
-				if (!webhookUrl) {
-					throw new NodeOperationError(this.getNode(), 'Could not determine the n8n webhook URL for this trigger');
-				}
+				const webhookUrl = getEffectiveWebhookUrl.call(this);
 				const events = this.getNodeParameter('events') as string[];
 				const stored = readStoredWebhookState(this.getWorkflowStaticData('node'));
 				if (stored?.id && stored.url === webhookUrl) {
@@ -201,6 +291,14 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 						});
 						return true;
 					}
+				}
+
+				if (stored?.id && hasWebhookUrlDrift(stored.url, webhookUrl)) {
+					const response = await revolutApiRequestWithFullResponse(this, 'DELETE', `/webhooks/${stored.id}`);
+					if (response.statusCode !== 204 && !isNotFoundResponse(response)) {
+						throw new NodeOperationError(this.getNode(), `Unexpected status when deleting old Revolut webhook ${stored.id}: ${response.statusCode}`);
+					}
+					clearWebhookState.call(this);
 				}
 
 				const existingByUrl = await findWebhookByUrl.call(this, webhookUrl);
