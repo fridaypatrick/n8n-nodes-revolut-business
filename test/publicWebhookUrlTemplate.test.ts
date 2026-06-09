@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
 	assertAutoRegisteredSigningSecret,
 	extractWebhookIdFromUrl,
+	getManualSigningSecretForWebhookVerification,
 	getSigningSecretForWebhookVerification,
 	getStoredSigningSecret,
 	hasWebhookUrlDrift,
@@ -146,6 +147,24 @@ test('uses stored signing secret for automatic registration and manual secret ot
 	assert.equal(getSigningSecretForWebhookVerification(false, {}, 'manual-secret'), 'manual-secret');
 });
 
+test('does not read hidden manual signing secret in automatic registration mode', () => {
+	const manualSigningSecret = getManualSigningSecretForWebhookVerification(true, () => {
+		throw new Error('signingSecret parameter should not be read in automatic registration mode');
+	});
+
+	assert.equal(manualSigningSecret, '');
+});
+
+test('reads manual signing secret only in manual verification mode', () => {
+	assert.equal(
+		getManualSigningSecretForWebhookVerification(false, (parameterName) => {
+			assert.equal(parameterName, 'signingSecret');
+			return 'manual-secret';
+		}),
+		'manual-secret',
+	);
+});
+
 test('activation fails when automatic registration cannot persist a signing secret', () => {
 	assert.throws(
 		() => assertAutoRegisteredSigningSecret({ id: 'hook-id', url: 'https://example.com', events: [] }),
@@ -173,4 +192,34 @@ test('trigger hides manual signature fields while automatic registration is enab
 	assert.deepEqual(verifySignature?.displayOptions, { show: { registerWebhook: [false] } });
 	assert.deepEqual(signingSecret?.displayOptions, { show: { registerWebhook: [false], verifySignature: [true] } });
 	assert.deepEqual(autoNotice?.displayOptions, { show: { registerWebhook: [true] } });
+});
+
+test('checkExists clears stale automatic lifecycle state when switched to manual mode', async () => {
+	const staticData = {
+		revolutWebhook: {
+			id: 'hook-id',
+			url: 'https://n8n.example.com/webhook/native-id/revolut-business',
+			events: [],
+		},
+	};
+	const trigger = new RevolutBusinessWebhookTrigger();
+	const result = await trigger.webhookMethods.default.checkExists.call({
+		getNodeParameter(parameterName: string) {
+			assert.equal(parameterName, 'registerWebhook');
+			return false;
+		},
+		getWorkflowStaticData(scope: string) {
+			assert.equal(scope, 'node');
+			return staticData;
+		},
+		getNodeWebhookUrl() {
+			throw new Error('manual mode should not resolve automatic webhook URL');
+		},
+		getNode() {
+			throw new Error('manual mode should not assert automatic signing secret');
+		},
+	} as never);
+
+	assert.equal(result, true);
+	assert.equal('revolutWebhook' in staticData, false);
 });

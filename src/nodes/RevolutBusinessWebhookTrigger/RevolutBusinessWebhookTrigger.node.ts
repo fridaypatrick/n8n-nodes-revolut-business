@@ -45,6 +45,13 @@ export function shouldVerifyWebhookSignature(registerWebhook: boolean, manualVer
 	return registerWebhook || manualVerifySignature;
 }
 
+export function getManualSigningSecretForWebhookVerification(
+	registerWebhook: boolean,
+	getNodeParameter: (parameterName: string) => unknown,
+): string {
+	return registerWebhook ? '' : getNodeParameter('signingSecret') as string;
+}
+
 export function getSigningSecretForWebhookVerification(
 	registerWebhook: boolean,
 	nodeData: IDataObject,
@@ -285,7 +292,8 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 			if (!rawBody) {
 				throw new NodeOperationError(this.getNode(), 'Webhook signature verification requires the raw request body, but it was not available from n8n for this request');
 			}
-			const signingSecret = getSigningSecretForWebhookVerification(registerWebhook, this.getWorkflowStaticData('node'), this.getNodeParameter('signingSecret') as string, this.getNode());
+			const manualSigningSecret = getManualSigningSecretForWebhookVerification(registerWebhook, this.getNodeParameter.bind(this));
+			const signingSecret = getSigningSecretForWebhookVerification(registerWebhook, this.getWorkflowStaticData('node'), manualSigningSecret, this.getNode());
 			signature = verifyWebhookSignature(rawBody, signingSecret, headers) as unknown as IDataObject;
 			if (!signature.verified) {
 				throw new NodeOperationError(this.getNode(), `Webhook signature verification failed: ${String(signature.reason ?? 'unknown reason')}`);
@@ -313,6 +321,12 @@ export class RevolutBusinessWebhookTrigger implements INodeType {
 	webhookMethods = {
 		default: {
 			async checkExists(this: IHookFunctions) {
+				const registerWebhook = this.getNodeParameter('registerWebhook') as boolean;
+				if (!registerWebhook) {
+					clearWebhookState.call(this);
+					return true;
+				}
+
 				const nodeData = this.getWorkflowStaticData('node');
 				const stored = readStoredWebhookState(nodeData);
 				if (!stored?.url) {
