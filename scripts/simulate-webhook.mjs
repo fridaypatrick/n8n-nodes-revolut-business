@@ -19,15 +19,24 @@ const payload = {
 };
 
 const rawBody = JSON.stringify(payload);
-const signature = crypto.createHmac('sha256', signingSecret).update(rawBody).digest('hex');
+const requestTimestamp = Date.now().toString();
+const signedPayload = `v1.${requestTimestamp}.${rawBody}`;
+const signature = crypto.createHmac('sha256', signingSecret).update(signedPayload).digest('hex');
 
 const response = await fetch(webhookUrl, {
 	method: 'POST',
 	headers: {
 		'content-type': 'application/json',
-		'revolut-signature': signature,
+		'Revolut-Request-Timestamp': requestTimestamp,
+		'revolut-signature': `v1=${signature}`,
 	},
 	body: rawBody,
 });
 
-console.log(JSON.stringify({ webhookUrl, status: response.status, statusText: response.statusText, signature, payload }, null, 2));
+console.log(
+	JSON.stringify(
+		{ webhookUrl, status: response.status, statusText: response.statusText, requestTimestamp, signature: `v1=${signature}`, payload },
+		null,
+		2,
+	),
+);

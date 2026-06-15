@@ -140,7 +140,7 @@ Do **not** click the n8n OAuth Connect button — authentication is driven by th
 > - Restrict access to the n8n editor UI (firewall, VPN, or basic auth). Do not expose the editor to the public internet.
 > - Do not expose unnecessary n8n paths; only the webhook path used by Revolut needs to be publicly reachable.
 > - In **auto-register mode** the trigger always verifies incoming signatures using the Revolut-generated signing secret stored at activation time — no manual setup is required. In **manual mode** (auto-register disabled), enable **Verify Signature** and provide the signing secret in the trigger node. Keep the signing secret confidential; if leaked, rotate it immediately via the Revolut Business node or Revolut dashboard, then deactivate/reactivate the workflow (auto-register) or update the **Signing Secret** field (manual) to resume verification.
-> - The trigger verifies signatures against the **raw request body**. Any proxy or gateway in front of n8n must forward the raw body and the `revolut-signature`/`x-revolut-signature` header unmodified — re-encoding or buffering the body breaks automatic verification.
+> - The trigger verifies signatures using the signed payload `v1.{Revolut-Request-Timestamp}.{rawBody}`. Any proxy or gateway in front of n8n must forward the raw body and both the `Revolut-Signature`/`x-revolut-signature` and `Revolut-Request-Timestamp` headers unmodified — re-encoding or buffering the body, or dropping either header, breaks automatic verification.
 > - Apply network-level controls (IP allowlisting, WAF rules) where your infrastructure supports it.
 
 ---
@@ -333,7 +333,7 @@ At production activation the node replaces `{webhookId}` with n8n's generated we
 **Gateway requirements** (also apply when using any proxy in front of n8n):
 
 - The gateway must forward the raw request body to n8n **unmodified**. Re-encoding or buffering the body breaks Revolut signature verification.
-- The `revolut-signature` (or `x-revolut-signature`) header must be forwarded intact.
+- The `Revolut-Signature` (or `x-revolut-signature`) and `Revolut-Request-Timestamp` headers must both be forwarded intact.
 
 See the **Security** callout above for additional proxy constraints.
 
@@ -358,11 +358,13 @@ npm run simulate:webhook
 
 **Manual mode** (auto-register disabled): Enable **Verify Signature** in the node parameters and paste the webhook signing secret into the **Signing Secret** field.
 
-**Algorithm assumptions** (both modes):
+**Algorithm** (both modes):
 
-- Signature header: `revolut-signature` or `x-revolut-signature`
-- Signature value: lowercase hex HMAC-SHA256 digest
-- Digest input: raw request body
+- Timestamp header: `Revolut-Request-Timestamp` (UNIX milliseconds)
+- Signature header: `Revolut-Signature` (or `x-revolut-signature`)
+- Signature value: `v1=<lowercase-hex-HMAC-SHA256>` — multiple values comma-separated
+- Signed payload: `v1.{Revolut-Request-Timestamp}.{rawBody}`
+- Timestamp tolerance: ±5 minutes
 
 Verification fails closed — if n8n does not expose the raw request body, the trigger returns a clear error rather than attempting to verify a re-serialized JSON body.
 
