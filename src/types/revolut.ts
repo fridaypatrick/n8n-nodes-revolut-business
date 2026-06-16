@@ -25,6 +25,7 @@ export interface StoredRevolutWebhookLifecycle {
 	id: string;
 	url: string;
 	events: string[];
+	signingSecret?: string;
 }
 
 export interface RevolutFailedWebhookEvent {
