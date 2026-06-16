@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-revolut-business",
-  "version": "1.0.0",
+  "version": "0.0.0-development",
   "description": "n8n community node for Revolut Business webhooks",
   "license": "MIT",
   "homepage": "https://github.com/ppiatkowski/n8n-nodes-revolut-business",
@@ -45,9 +45,7 @@
     "n8n-core": "^2.16.1"
   },
   "devDependencies": {
-    "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/exec": "^7.1.0",
-    "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^12.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.12.2",

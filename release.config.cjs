@@ -15,22 +15,11 @@ const currentBranch = process.env.GITHUB_REF_NAME || process.env.BRANCH_NAME || 
 const isMainBranch = currentBranch === 'main';
 const prereleaseIdentifier = sanitizePrereleaseIdentifier(currentBranch);
 
-const stablePlugins = [
-  '@semantic-release/changelog',
-  [
-    '@semantic-release/exec',
-    {
-      prepareCmd:
-        'rm -rf release && npm version ${nextRelease.version} --no-git-tag-version && mkdir -p release && npm pack --pack-destination release',
-    },
-  ],
-  [
-    '@semantic-release/git',
-    {
-      assets: ['package.json', 'package-lock.json', 'CHANGELOG.md'],
-      message: 'chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}',
-    },
-  ],
+const packPlugin = [
+  '@semantic-release/exec',
+  {
+    prepareCmd: 'rm -rf release && mkdir -p release && npm pack --pack-destination release',
+  },
 ];
 
 module.exports = {
@@ -40,18 +29,7 @@ module.exports = {
   plugins: [
     '@semantic-release/commit-analyzer',
     '@semantic-release/release-notes-generator',
-    ...(isMainBranch ? stablePlugins : []),
-    ...(!isMainBranch
-      ? [
-          [
-            '@semantic-release/exec',
-            {
-              prepareCmd:
-                'rm -rf release && npm version ${nextRelease.version} --no-git-tag-version && mkdir -p release && npm pack --pack-destination release',
-            },
-          ],
-        ]
-      : []),
+    packPlugin,
     [
       '@semantic-release/github',
       {
