@@ -2,9 +2,6 @@ name: Commitlint
 
 on:
   pull_request:
-  push:
-    branches-ignore:
-      - main
 
 permissions:
   contents: read
@@ -30,19 +27,11 @@ jobs:
 
       - name: Lint commits
         env:
-          EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE_SHA: ${{ github.event.before }}
-          PUSH_SHA: ${{ github.sha }}
         run: |
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            FROM="$PR_BASE_SHA"
-            TO="$PR_HEAD_SHA"
-          else
-            FROM="$PUSH_BEFORE_SHA"
-            TO="$PUSH_SHA"
-          fi
+          FROM="$PR_BASE_SHA"
+          TO="$PR_HEAD_SHA"
 
           if [ -z "$FROM" ] || [ "$FROM" = "0000000000000000000000000000000000000000" ]; then
             FROM="$(git rev-list --max-parents=0 "$TO")"
