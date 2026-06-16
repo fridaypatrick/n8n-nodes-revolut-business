@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { REVOLUT_REQUEST_TIMESTAMP_HEADER_NAME, REVOLUT_SIGNATURE_HEADER_NAMES } from './constants';
 
 const REVOLUT_SIGNATURE_TOLERANCE_MS = 5 * 60 * 1000;
+const SHA256_HEX_HMAC_PATTERN = /^[a-f0-9]{64}$/i;
 
 export interface VerificationResult {
 	verified: boolean;
@@ -74,7 +75,7 @@ export function extractRevolutSignatures(signatureHeader: string): string[] {
 	return signatureHeader
 		.split(',')
 		.map((part) => part.trim())
-		.map((part) => part.startsWith('v1=') ? part.slice(3) : part)
-		.map((part) => part.trim().toLowerCase())
-		.filter(Boolean);
+		.map((part) => part.startsWith('v1=') ? part.slice(3).trim() : part)
+		.filter((part) => SHA256_HEX_HMAC_PATTERN.test(part))
+		.map((part) => part.toLowerCase());
 }

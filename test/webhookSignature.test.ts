@@ -52,6 +52,68 @@ test('verifies one of multiple comma-separated Revolut signatures', () => {
 	assert.equal(result.verified, true);
 });
 
+test('fails with no supported signature value when only unsupported tokens are provided', () => {
+	const result = verifyWebhookSignature('{}', 'wsk_test_secret', {
+		'revolut-request-timestamp': String(now),
+		'revolut-signature': 't=1700000000000, v2=abc, foo',
+	}, { now });
+
+	assert.equal(result.verified, false);
+	assert.equal(result.reason, 'No supported Revolut signature value found');
+});
+
+test('verifies mixed unsupported tokens and valid v1 Revolut signature', () => {
+	const rawBody = JSON.stringify({ event: 'TransactionCreated' });
+	const secret = 'wsk_test_secret';
+	const timestamp = String(now);
+	const signature = createOfficialSignature(rawBody, secret, timestamp);
+
+	const result = verifyWebhookSignature(rawBody, secret, {
+		'revolut-request-timestamp': timestamp,
+		'revolut-signature': `t=${timestamp}, v2=abc, v1=${signature}`,
+	}, { now });
+
+	assert.equal(result.verified, true);
+});
+
+test('ignores invalid hex and invalid-length signature values', () => {
+	const result = verifyWebhookSignature('{}', 'wsk_test_secret', {
+		'revolut-request-timestamp': String(now),
+		'revolut-signature': 'v1=not-hex, deadbeef, v1=abc123, abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl',
+	}, { now });
+
+	assert.equal(result.verified, false);
+	assert.equal(result.reason, 'No supported Revolut signature value found');
+});
+
+test('accepts and normalizes uppercase raw hex signature values', () => {
+	const rawBody = JSON.stringify({ event: 'TransactionCreated' });
+	const secret = 'wsk_test_secret';
+	const timestamp = String(now);
+	const signature = createOfficialSignature(rawBody, secret, timestamp).toUpperCase();
+
+	const result = verifyWebhookSignature(rawBody, secret, {
+		'revolut-request-timestamp': timestamp,
+		'revolut-signature': signature,
+	}, { now });
+
+	assert.equal(result.verified, true);
+});
+
+test('accepts and normalizes uppercase hex in v1 signature values', () => {
+	const rawBody = JSON.stringify({ event: 'TransactionCreated' });
+	const secret = 'wsk_test_secret';
+	const timestamp = String(now);
+	const signature = createOfficialSignature(rawBody, secret, timestamp).toUpperCase();
+
+	const result = verifyWebhookSignature(rawBody, secret, {
+		'revolut-request-timestamp': timestamp,
+		'revolut-signature': `v1=${signature}`,
+	}, { now });
+
+	assert.equal(result.verified, true);
+});
+
 test('fails when raw-body-only signature is provided', () => {
 	const rawBody = JSON.stringify({ event: 'TransactionCreated' });
 	const secret = 'wsk_test_secret';
